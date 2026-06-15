@@ -1,0 +1,43 @@
+{
+  "name": "clearinghouse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Official Livepeer example: remote-signer auth + usage metering on @pymthouse/builder-sdk",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check"
+  },
+  "dependencies": {
+    "@pymthouse/builder-sdk": "^0.4.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^4.1.4"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/livepeer/clearinghouse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/livepeer/clearinghouse/issues"
+  },
+  "homepage": "https://github.com/livepeer/clearinghouse#readme"
+}
