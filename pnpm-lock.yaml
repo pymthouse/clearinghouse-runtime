@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@openmeter/sdk':
+        specifier: ^1.0.0-beta.228
+        version: 1.0.0-beta.229(react@19.2.7)
       '@pymthouse/builder-sdk':
         specifier: ^0.4.1
         version: 0.4.1
@@ -270,6 +273,12 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
+
+  '@openmeter/sdk@1.0.0-beta.229':
+    resolution: {integrity: sha512-mDMfo94+gzFKtLR/SNrlUhvt4GKj/oZeq9kEbga9MW8XtMO9fjn2JRytpiyDLflSXMPiQS84ty2f6zIui+slnw==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      react: '>=18.0.0'
 
   '@oxc-project/types@0.133.0':
     resolution: {integrity: sha512-KzkdCd6Uxqnf6l3HOw1xfatAlUURA0g14cvBYFyJ5SaNOQbOUvBr9PKArcPcrNIeRsBdgcUzOGrhKveVpvOIGA==}
@@ -839,6 +848,12 @@ packages:
     resolution: {integrity: sha512-9miFgM2OFba7hB+pRgvtV84pYTBaoTHohvmIgiRt6dRIzbwEOIaNaP+dIlGs2fNFoB0SeISs0Jz5WFVRid6Xyg==}
     engines: {node: '>=12.20.0'}
 
+  openapi-fetch@0.17.0:
+    resolution: {integrity: sha512-PsbZR1wAPcG91eEthKhN+Zn92FMHxv+/faECIwjXdxfTODGSGegYv0sc1Olz+HYPvKOuoXfp+0pA2XVt2cI0Ig==}
+
+  openapi-typescript-helpers@0.1.0:
+    resolution: {integrity: sha512-OKTGPthhivLw/fHz6c3OPtg72vi86qaMlqbJuVJ23qOvQ+53uw1n7HdmkJFibloF7QEjDrDkzJiOJuockM/ljw==}
+
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
     engines: {node: '>= 0.8.0'}
@@ -889,6 +904,10 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  react@19.2.7:
+    resolution: {integrity: sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ==}
+    engines: {node: '>=0.10.0'}
 
   resolve-from@4.0.0:
     resolution: {integrity: sha512-pb/MYmXstAkysRFx8piNI1tGFNQIFA3vkE3Gq4EuA1dF6gHp/+vgZqsCGJapvy8N3Q+4o7FwvquPJcnZ7RYy4g==}
@@ -1252,6 +1271,12 @@ snapshots:
       '@emnapi/runtime': 1.10.0
       '@tybys/wasm-util': 0.10.2
     optional: true
+
+  '@openmeter/sdk@1.0.0-beta.229(react@19.2.7)':
+    dependencies:
+      openapi-fetch: 0.17.0
+      openapi-typescript-helpers: 0.1.0
+      react: 19.2.7
 
   '@oxc-project/types@0.133.0': {}
 
@@ -1790,6 +1815,12 @@ snapshots:
 
   obug@2.1.3: {}
 
+  openapi-fetch@0.17.0:
+    dependencies:
+      openapi-typescript-helpers: 0.1.0
+
+  openapi-typescript-helpers@0.1.0: {}
+
   optionator@0.9.4:
     dependencies:
       deep-is: 0.1.4
@@ -1832,6 +1863,8 @@ snapshots:
   prettier@3.8.4: {}
 
   punycode@2.3.1: {}
+
+  react@19.2.7: {}
 
   resolve-from@4.0.0: {}
 

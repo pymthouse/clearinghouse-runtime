@@ -1,0 +1,76 @@
+name: Deploy Railway clearinghouse stack
+
+# Deploys the deploy/ stack (kafka + openmeter-collector + remote-signer) to Railway.
+#
+# Opt in by setting a repository variable:
+#   RAILWAY_AUTO_DEPLOY=true
+# Until set, this workflow is a no-op and won't break CI on repositories with no
+# Railway project or secrets configured.
+#
+# Required secrets (set via gh secret set ... -R livepeer/clearinghouse):
+#   RAILWAY_API_TOKEN       Railway account token (Account → Tokens, workspace scope)
+#   RAILWAY_PROJECT_ID      Railway project ID (project Settings → General)
+#   OPENMETER_URL           e.g. https://us.api.konghq.com/v3/openmeter
+#   OPENMETER_API_KEY       Konnect PAT (kpat_…) or OpenMeter API key
+#   OPENMETER_INGEST_URL    ${OPENMETER_URL}/events (Konnect) or ${OPENMETER_URL}/api/v1/events (self-hosted)
+#   WEBHOOK_SECRET          Shared secret for the remote-signer identity webhook
+#   REMOTE_SIGNER_WEBHOOK_URL  Identity webhook URL (clearinghouse /authorize once issue #2 lands)
+#
+# Optional secrets:
+#   ETH_RPC_URL             Arbitrum RPC (default: public arb1 endpoint)
+#
+# Optional repository variables:
+#   SIGNER_NETWORK          default: arbitrum-one-mainnet
+#   SIGNER_ETH_ADDR         Funded signer Ethereum address
+#   RAILWAY_AUTO_DEPLOY     Set to 'true' to enable this workflow
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/**"
+      - "scripts/railway-*.sh"
+      - "scripts/lib/railway-*.sh"
+      - ".github/workflows/deploy-railway.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Railway environment to deploy
+        type: string
+        default: production
+
+concurrency:
+  group: deploy-railway-${{ inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: vars.RAILWAY_AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: railway / ${{ inputs.environment || 'production' }}
+    env:
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT: ${{ inputs.environment || 'production' }}
+      OPENMETER_URL: ${{ secrets.OPENMETER_URL }}
+      OPENMETER_API_KEY: ${{ secrets.OPENMETER_API_KEY }}
+      OPENMETER_INGEST_URL: ${{ secrets.OPENMETER_INGEST_URL }}
+      WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+      REMOTE_SIGNER_WEBHOOK_URL: ${{ secrets.REMOTE_SIGNER_WEBHOOK_URL }}
+      SIGNER_NETWORK: ${{ vars.SIGNER_NETWORK || 'arbitrum-one-mainnet' }}
+      ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
+      SIGNER_ETH_ADDR: ${{ vars.SIGNER_ETH_ADDR }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli@latest
+      - name: Apply stack environment variables
+        run: bash scripts/railway-apply-stack-env.sh
+      - name: Deploy stack
+        run: bash scripts/railway-deploy-stack.sh "$RAILWAY_ENVIRONMENT"

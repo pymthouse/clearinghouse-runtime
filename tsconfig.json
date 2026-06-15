@@ -12,5 +12,5 @@
     "noEmit": true,
     "outDir": "dist"
   },
-  "include": ["src/**/*.ts", "vitest.config.ts", "eslint.config.mjs"]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "vitest.config.ts", "eslint.config.mjs"]
 }

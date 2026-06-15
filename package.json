@@ -16,9 +16,14 @@
     "lint": "eslint .",
     "test": "vitest run",
     "format": "prettier . --write",
-    "format:check": "prettier . --check"
+    "format:check": "prettier . --check",
+    "openmeter:bootstrap": "tsx scripts/openmeter-bootstrap.ts",
+    "stack:up": "docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build",
+    "stack:down": "docker compose -f deploy/docker-compose.yml --env-file deploy/.env down",
+    "stack:logs": "docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f"
   },
   "dependencies": {
+    "@openmeter/sdk": "^1.0.0-beta.228",
     "@pymthouse/builder-sdk": "^0.4.1"
   },
   "devDependencies": {
