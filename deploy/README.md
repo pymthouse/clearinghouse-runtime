@@ -10,10 +10,9 @@ there is no Apache reverse proxy or `mod_authnz_jwt` layer in front of it.
 Identity validation is handled by the `-remoteSignerWebhookUrl` hook (`POST
 /authorize` on the `identity-webhook` service) and the shared `WEBHOOK_SECRET`.
 
-The `identity-webhook` container runs `@pymthouse/builder-sdk`'s Auth0 billing webhook:
-it validates Auth0 JWTs via JWKS, returns `auth_id = "{azp}:{sub}"` to the signer,
-and provisions Konnect customers on first authorize (lazy) or via `POST /admin/customers`.
-No database or local identity storage required.
+The `identity-webhook` container uses `@pymthouse/builder-sdk`'s Auth0 billing webhook
+with `createOpenMeterClient`, which auto-detects Kong Konnect URLs (`*.konghq.com` /
+`kpat_` keys) and rewrites `@openmeter/sdk` requests to the Konnect Metering v3 API.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to
 `127.0.0.1:4935` inside the container and is never published or mapped to the

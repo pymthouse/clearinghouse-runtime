@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
-import { OpenMeter } from "@openmeter/sdk";
 import { createAuth0ManagementClient } from "@pymthouse/builder-sdk/auth0/management";
+import { createOpenMeterClient } from "@pymthouse/builder-sdk/billing/openmeter";
 import {
   createAuth0BillingWebhookConfig,
   routeRemoteSignerWebhookRequest,
@@ -22,7 +22,7 @@ function optional(name) {
 }
 
 function buildConfig() {
-  const openMeterClient = new OpenMeter({
+  const openMeterClient = createOpenMeterClient({
     baseUrl: required("OPENMETER_URL"),
     apiKey: required("OPENMETER_API_KEY"),
   });
