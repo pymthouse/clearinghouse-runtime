@@ -10,20 +10,20 @@ import (
 )
 
 type ProvisionResult struct {
-	APIIdentifier  string
-	PublicClientID string
-	M2MClientID    string
+	APIIdentifier   string
+	PublicClientID  string
+	M2MClientID     string
 	M2MClientSecret string
-	JwksURL        string
-	Issuer         string
+	JwksURL         string
+	Issuer          string
 }
 
 type ProvisionConfig struct {
-	Domain          string
-	MgmtClientID    string
+	Domain           string
+	MgmtClientID     string
 	MgmtClientSecret string
-	AppName         string
-	APIAudience     string
+	AppName          string
+	APIAudience      string
 }
 
 func Provision(ctx context.Context, cfg ProvisionConfig) (*ProvisionResult, error) {
@@ -41,9 +41,9 @@ func Provision(ctx context.Context, cfg ProvisionConfig) (*ProvisionResult, erro
 	tokenLifetime := 86400
 	skipConsent := true
 	_, err = mgmt.ResourceServers.Create(ctx, &management.CreateResourceServerRequestContent{
-		Name:       &rsName,
-		Identifier: cfg.APIAudience,
-		SigningAlg: &signingAlg,
+		Name:          &rsName,
+		Identifier:    cfg.APIAudience,
+		SigningAlg:    &signingAlg,
 		TokenLifetime: &tokenLifetime,
 		SkipConsentForVerifiableFirstPartyClients: &skipConsent,
 		Scopes: []*management.ResourceServerScope{
@@ -66,12 +66,12 @@ func Provision(ctx context.Context, cfg ProvisionConfig) (*ProvisionResult, erro
 	oidcConformant := true
 
 	publicResp, err := mgmt.Clients.Create(ctx, &management.CreateClientRequestContent{
-		Name:                   publicName,
-		Description:            &publicDesc,
-		AppType:                &appTypeNative,
-		OidcConformant:         &oidcConformant,
-		IsFirstParty:           &isFirstParty,
-		GrantTypes:             []string{"urn:ietf:params:oauth:grant-type:device_code", "refresh_token"},
+		Name:                    publicName,
+		Description:             &publicDesc,
+		AppType:                 &appTypeNative,
+		OidcConformant:          &oidcConformant,
+		IsFirstParty:            &isFirstParty,
+		GrantTypes:              []string{"urn:ietf:params:oauth:grant-type:device_code", "refresh_token"},
 		TokenEndpointAuthMethod: &authMethodNone,
 	})
 	if err != nil {
@@ -89,11 +89,11 @@ func Provision(ctx context.Context, cfg ProvisionConfig) (*ProvisionResult, erro
 	authMethodPost := management.ClientTokenEndpointAuthMethodEnumClientSecretPost
 
 	m2mResp, err := mgmt.Clients.Create(ctx, &management.CreateClientRequestContent{
-		Name:                   m2mName,
-		Description:            &m2mDesc,
-		AppType:                &appTypeM2M,
-		OidcConformant:         &oidcConformant,
-		GrantTypes:             []string{"client_credentials"},
+		Name:                    m2mName,
+		Description:             &m2mDesc,
+		AppType:                 &appTypeM2M,
+		OidcConformant:          &oidcConformant,
+		GrantTypes:              []string{"client_credentials"},
 		TokenEndpointAuthMethod: &authMethodPost,
 	})
 	if err != nil {
@@ -131,12 +131,12 @@ func Provision(ctx context.Context, cfg ProvisionConfig) (*ProvisionResult, erro
 	jwksURL := fmt.Sprintf("https://%s/.well-known/jwks.json", cfg.Domain)
 
 	return &ProvisionResult{
-		APIIdentifier:  cfg.APIAudience,
-		PublicClientID: publicClientID,
-		M2MClientID:    m2mClientID,
+		APIIdentifier:   cfg.APIAudience,
+		PublicClientID:  publicClientID,
+		M2MClientID:     m2mClientID,
 		M2MClientSecret: m2mClientSecret,
-		JwksURL:        jwksURL,
-		Issuer:         issuer,
+		JwksURL:         jwksURL,
+		Issuer:          issuer,
 	}, nil
 }
 

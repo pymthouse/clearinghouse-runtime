@@ -9,9 +9,9 @@ import (
 )
 
 type catalogExpectations struct {
-	meters    map[string]MeterInput
-	features  map[string]string // feature key -> meter key
-	planKeys  map[string]struct{}
+	meters   map[string]MeterInput
+	features map[string]string // feature key -> meter key
+	planKeys map[string]struct{}
 }
 
 func buildCatalogExpectations(
@@ -43,7 +43,7 @@ func buildCatalogExpectations(
 	return catalogExpectations{
 		meters: meterInputs,
 		features: map[string]string{
-			trialFeatureKey:            meterCfg.NetworkFeeUsdMicrosMeter,
+			trialFeatureKey:               meterCfg.NetworkFeeUsdMicrosMeter,
 			pricingCfg.BillableFeatureKey: meterCfg.BillableUsdMicrosMeter,
 		},
 		planKeys: planKeys,

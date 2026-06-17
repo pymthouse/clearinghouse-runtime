@@ -25,13 +25,13 @@ type meterSpec struct {
 type Config struct {
 	CreateSignedTicketEventType string            `json:"createSignedTicketEventType"`
 	SignedTicketEventSource     string            `json:"signedTicketEventSource"`
-	DefaultTrialFeatureKey     string            `json:"defaultTrialFeatureKey"`
-	DefaultBillableFeatureKey  string            `json:"defaultBillableFeatureKey"`
-	NetworkFeeUsdMicrosMeter   string            `json:"networkFeeUsdMicrosMeter"`
-	BillableUsdMicrosMeter     string            `json:"billableUsdMicrosMeter"`
-	SignedTicketCountMeter     string            `json:"signedTicketCountMeter"`
-	Dimensions                 map[string]string `json:"dimensions"`
-	Meters                     struct {
+	DefaultTrialFeatureKey      string            `json:"defaultTrialFeatureKey"`
+	DefaultBillableFeatureKey   string            `json:"defaultBillableFeatureKey"`
+	NetworkFeeUsdMicrosMeter    string            `json:"networkFeeUsdMicrosMeter"`
+	BillableUsdMicrosMeter      string            `json:"billableUsdMicrosMeter"`
+	SignedTicketCountMeter      string            `json:"signedTicketCountMeter"`
+	Dimensions                  map[string]string `json:"dimensions"`
+	Meters                      struct {
 		NetworkFeeUsdMicros meterSpec `json:"networkFeeUsdMicros"`
 		BillableUsdMicros   meterSpec `json:"billableUsdMicros"`
 		SignedTicketCount   meterSpec `json:"signedTicketCount"`

@@ -24,7 +24,7 @@ The CLI loads `.env` from the current directory automatically. See
 
 ## What it does
 
-1. **Auth0** — creates a resource server (`livepeer`, RS256, `sign:job`),
+1. **Auth0** — creates a resource server (`livepeer-clearinghouse`, RS256, `sign:job`),
    a public client (native, device_code + refresh_token), an M2M client
    (client_credentials), and two client grants. Uses
    [`go-auth0/v2`](https://github.com/auth0/go-auth0).

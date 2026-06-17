@@ -44,8 +44,8 @@ func (k *KonnectAdmin) WaitForHealthy(ctx context.Context) error {
 	for i := range maxAttempts {
 		res, err := k.sdk.Meters.ListMeters(ctx, operations.ListMetersRequest{
 			Page: &components.PagePaginationQuery{
-			Number: sdkkonnectgo.Pointer(int64(1)),
-			Size:   sdkkonnectgo.Pointer(int64(1)),
+				Number: sdkkonnectgo.Pointer(int64(1)),
+				Size:   sdkkonnectgo.Pointer(int64(1)),
 			},
 		})
 		if err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {

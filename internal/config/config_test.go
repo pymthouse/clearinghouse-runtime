@@ -34,10 +34,10 @@ func TestParseMinimal(t *testing.T) {
 	if cfg.Auth0Domain != "test.auth0.com" {
 		t.Errorf("Auth0Domain = %s", cfg.Auth0Domain)
 	}
-	if cfg.AppName != "Livepeer Platform" {
+	if cfg.AppName != "Livepeer Clearinghouse" {
 		t.Errorf("AppName = %s", cfg.AppName)
 	}
-	if cfg.APIAudience != "livepeer" {
+	if cfg.APIAudience != "livepeer-clearinghouse" {
 		t.Errorf("APIAudience = %s", cfg.APIAudience)
 	}
 	if cfg.WebhookSecret == "" {
