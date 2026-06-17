@@ -10,9 +10,10 @@ there is no Apache reverse proxy or `mod_authnz_jwt` layer in front of it.
 Identity validation is handled by the `-remoteSignerWebhookUrl` hook (`POST
 /authorize` on the `identity-webhook` service) and the shared `WEBHOOK_SECRET`.
 
-The `identity-webhook` container runs `@pymthouse/builder-sdk`'s OIDC handler:
-it validates Auth0 JWTs via JWKS and returns `auth_id = "{azp}:{sub}"` to the
-signer. No database or local identity storage required.
+The `identity-webhook` container runs `@pymthouse/builder-sdk`'s Auth0 billing webhook:
+it validates Auth0 JWTs via JWKS, returns `auth_id = "{azp}:{sub}"` to the signer,
+and provisions Konnect customers on first authorize (lazy) or via `POST /admin/customers`.
+No database or local identity storage required.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to
 `127.0.0.1:4935` inside the container and is never published or mapped to the
@@ -67,7 +68,10 @@ docker compose -f deploy/docker-compose.yml --env-file .env.livepeer port remote
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` — from bootstrap) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
-| `AUTH0_PUBLIC_CLIENT_ID` | no | — | Auth0 public client id (from bootstrap) |
+| `AUTH0_PUBLIC_CLIENT_ID` | yes (webhook) | — | Auth0 public client id — Konnect customer `clientId` (from bootstrap) |
+| `AUTH0_MGMT_CLIENT_ID` / `AUTH0_MGMT_CLIENT_SECRET` | yes (admin API) | — | Auth0 Management API creds for `POST /admin/customers` user creation |
+| `OPENMETER_DEFAULT_PLAN_KEY` | yes (webhook) | — | Default plan key from `config/pricing.json` (from bootstrap) |
+| `STRICT_BILLING_PROVISION` | no | `0` | Set `1` to fail `/authorize` when lazy Konnect provision fails |
 
 ## OpenMeter/Konnect bootstrap
 
@@ -118,8 +122,32 @@ stays empty while the catalog is ready.
 
 Example customer key: `abc123xyz:auth0|user456`
 
-Per-customer provisioning (Konnect customer + subscription) is a follow-up — not
-yet implemented in the Go CLI.
+### Customer provisioning
+
+**Lazy provision** — on each successful `POST /authorize`, the webhook ensures a
+Konnect customer (`{AUTH0_PUBLIC_CLIENT_ID}:{sub}`) and active subscription on
+`OPENMETER_DEFAULT_PLAN_KEY`. Failures are logged by default; set
+`STRICT_BILLING_PROVISION=1` to fail closed.
+
+**Admin API** — create Auth0 user (optional) + Konnect customer in one call:
+
+```bash
+curl -X POST http://localhost:8090/admin/customers \
+  -H "Authorization: Bearer $WEBHOOK_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"..."}'
+```
+
+Or provision an existing Auth0 user:
+
+```bash
+curl -X POST http://localhost:8090/admin/customers \
+  -H "Authorization: Bearer $WEBHOOK_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"externalUserId":"auth0|..."}'
+```
+
+Per-customer provisioning via the Go CLI is a follow-up.
 
 ## Railway deploy
 

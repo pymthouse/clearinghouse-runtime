@@ -90,8 +90,3 @@ For production, set `PLATFORM_URL` before bootstrap to target
 
 See [`deploy/README.md`](deploy/README.md) for env vars, Railway deploy scripts,
 and architecture notes.
-
-## Follow-ups (out of scope)
-
-- Per-customer provisioning (customers + subscriptions)
-- Self-hosted OpenMeter adapter

@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
+import { OpenMeter } from "@openmeter/sdk";
+import { createAuth0ManagementClient } from "@pymthouse/builder-sdk/auth0/management";
 import {
-  createOidcRemoteSignerWebhookConfig,
+  createAuth0BillingWebhookConfig,
   routeRemoteSignerWebhookRequest,
 } from "@pymthouse/builder-sdk/signer/webhook";
 
@@ -14,16 +16,57 @@ function required(name) {
   return value;
 }
 
-const config = createOidcRemoteSignerWebhookConfig({
-  webhookSecret: required("WEBHOOK_SECRET"),
-  jwtIssuer: required("JWT_ISSUER"),
-  jwtAudience: required("JWT_AUDIENCE"),
-  claimMapping: {
-    claimClientId: process.env.CLAIM_CLIENT_ID?.trim() || "azp",
-    usageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "auth0_user_id",
-  },
-  allowInsecureHttp: true,
-});
+function optional(name) {
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
+function buildConfig() {
+  const openMeterClient = new OpenMeter({
+    baseUrl: required("OPENMETER_URL"),
+    apiKey: required("OPENMETER_API_KEY"),
+  });
+
+  const mgmtClientId = optional("AUTH0_MGMT_CLIENT_ID");
+  const mgmtClientSecret = optional("AUTH0_MGMT_CLIENT_SECRET");
+  const auth0Domain = optional("AUTH0_DOMAIN");
+
+  const auth0Management =
+    auth0Domain && mgmtClientId && mgmtClientSecret
+      ? createAuth0ManagementClient({
+          domain: auth0Domain,
+          clientId: mgmtClientId,
+          clientSecret: mgmtClientSecret,
+        })
+      : undefined;
+
+  return createAuth0BillingWebhookConfig({
+    webhookSecret: required("WEBHOOK_SECRET"),
+    jwtIssuer: required("JWT_ISSUER"),
+    jwtAudience: required("JWT_AUDIENCE"),
+    claimMapping: {
+      claimClientId: process.env.CLAIM_CLIENT_ID?.trim() || "azp",
+      usageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "auth0_user_id",
+    },
+    allowInsecureHttp: true,
+    openMeterClient,
+    billingClientId: required("AUTH0_PUBLIC_CLIENT_ID"),
+    planKey: required("OPENMETER_DEFAULT_PLAN_KEY"),
+    auth0Management,
+    defaultAuth0Connection:
+      process.env.AUTH0_DEFAULT_CONNECTION?.trim() || "Username-Password-Authentication",
+    strictBillingProvision: process.env.STRICT_BILLING_PROVISION === "1",
+    onBillingProvisionError: (err, identity) => {
+      console.warn(
+        "lazy billing provision failed:",
+        err instanceof Error ? err.message : err,
+        identity,
+      );
+    },
+  });
+}
+
+const config = buildConfig();
 
 function readBody(req) {
   return new Promise((resolve, reject) => {

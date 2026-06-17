@@ -12,10 +12,12 @@ import (
 
 func TestBuildEnvFile(t *testing.T) {
 	cfg := &config.BootstrapConfig{
-		Auth0Domain:     "test.us.auth0.com",
-		OpenmeterURL:    "https://us.api.konghq.com/v3/openmeter",
-		OpenmeterAPIKey: "kpat_test123",
-		TrialFeatureKey: "network_spend",
+		Auth0Domain:            "test.us.auth0.com",
+		Auth0MgmtClientID:      "mgmt_123",
+		Auth0MgmtClientSecret:  "mgmt_secret",
+		OpenmeterURL:           "https://us.api.konghq.com/v3/openmeter",
+		OpenmeterAPIKey:        "kpat_test123",
+		TrialFeatureKey:        "network_spend",
 		WebhookSecret:          "deadbeef",
 		RemoteSignerWebhookURL: config.DefaultDockerWebhookURL,
 	}
@@ -28,7 +30,7 @@ func TestBuildEnvFile(t *testing.T) {
 		Issuer:          "https://test.us.auth0.com/",
 	}
 
-	got := BuildEnvFile(cfg, auth0Result)
+	got := BuildEnvFile(cfg, auth0Result, "clearinghouse_default_ppu")
 
 	golden := filepath.Join("testdata", "env.golden")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
@@ -56,7 +58,7 @@ func TestBuildEnvFileSkipAuth0(t *testing.T) {
 		WebhookSecret:   "abc",
 	}
 
-	got := BuildEnvFile(cfg, nil)
+	got := BuildEnvFile(cfg, nil, "")
 
 	if strings.Contains(got, "AUTH0_DOMAIN") {
 		t.Error("env should not contain Auth0 block when skipped")

@@ -88,7 +88,7 @@ func main() {
 		log.Println("Skipping OpenMeter (--skip-openmeter)")
 	}
 
-	envContent := output.BuildEnvFile(cfg, auth0Result)
+	envContent := output.BuildEnvFile(cfg, auth0Result, defaultPlanKey(cfg))
 	if err := os.WriteFile(cfg.OutputPath, []byte(envContent), 0644); err != nil {
 		log.Fatalf("Failed to write %s: %v", cfg.OutputPath, err)
 	}
@@ -106,6 +106,17 @@ func main() {
 	}
 
 	log.Println("Bootstrap complete.")
+}
+
+func defaultPlanKey(cfg *config.BootstrapConfig) string {
+	if cfg.SkipOpenMeter {
+		return ""
+	}
+	pricingCfg, err := pricing.Load(cfg.PricingConfigPath)
+	if err != nil {
+		return ""
+	}
+	return pricingCfg.DefaultPlanKey
 }
 
 func fileExists(path string) bool {
