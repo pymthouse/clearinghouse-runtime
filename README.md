@@ -27,11 +27,16 @@ together** — the thing a platform operator clones, configures, and runs.
 
 ## Status
 
-This is the scaffolding for [Deliverable
-1](https://github.com/livepeer/clearinghouse/milestones) — build, lint, test,
-and CI are wired up and `@pymthouse/builder-sdk` resolves, but the
-`/authorize` webhook route, OIDC/API-key adapters, Kafka collector, and admin
-API are implemented in follow-up issues. See the [issue
+The **first MVP deliverable** is the Docker deploy stack in [`deploy/`](deploy/)
+— Kafka/Redpanda, a go-livepeer remote signer (no Apache DMZ, CLI port not
+exposed), the OpenMeter/Benthos collector, and OpenMeter/Konnect bootstrap
+scripts. See [deploy/README.md](deploy/README.md) for local usage and Railway
+deploy scripts.
+
+The TS/pnpm package scaffold, build, lint, test, and CI are in place
+(`@pymthouse/builder-sdk` resolves), along with the Konnect OpenAPI client,
+admin layer, and bootstrap scripts. The `/authorize` webhook route lands in a
+follow-up issue. See the [issue
 tracker](https://github.com/livepeer/clearinghouse/issues) and milestones for
 the full roadmap.
 

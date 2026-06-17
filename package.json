@@ -19,7 +19,10 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "openmeter:bootstrap": "tsx --env-file=.env scripts/openmeter-bootstrap.ts",
-    "provision:customer": "tsx --env-file=.env scripts/provision-customer.ts"
+    "provision:customer": "tsx --env-file=.env scripts/provision-customer.ts",
+    "stack:up": "docker compose -f deploy/docker-compose.yml --env-file .env up -d --build",
+    "stack:down": "docker compose -f deploy/docker-compose.yml --env-file .env down",
+    "stack:logs": "docker compose -f deploy/docker-compose.yml --env-file .env logs -f"
   },
   "dependencies": {
     "@openmeter/sdk": "^1.0.0-beta.228",
