@@ -101,6 +101,7 @@ go-livepeer  ──create_signed_ticket──▶ Kafka ──▶ Benthos collect
 
 ```bash
 pnpm install
+cp .env.example .env   # then edit OPENMETER_URL, OPENMETER_API_KEY, …
 pnpm dev        # run the webhook server locally
 pnpm build      # compile src/ -> dist/
 pnpm start      # run the compiled server
@@ -115,6 +116,24 @@ pnpm start      # run the compiled server
 | `pnpm lint`                         | ESLint, zero warnings                |
 | `pnpm test`                         | Vitest                               |
 | `pnpm format` / `pnpm format:check` | Prettier                             |
+| `pnpm openmeter:bootstrap`          | Konnect/OpenMeter catalog + default PPU plan |
+| `pnpm provision:customer`           | Auth0 customer + default plan subscription   |
+
+### OpenMeter bootstrap
+
+Provision meters, features, and the default pay-per-use plan against Konnect or self-hosted OpenMeter:
+
+```bash
+OPENMETER_URL=https://us.api.konghq.com/v3/openmeter \
+OPENMETER_API_KEY=kpat_... \
+pnpm openmeter:bootstrap
+```
+
+See [`packages/konnect-metering/README.md`](packages/konnect-metering/README.md) for client details. Per-customer subscriptions:
+
+```bash
+pnpm provision:customer -- --client-id <AUTH0_PUBLIC_CLIENT_ID> --external-user-id 'auth0|sub'
+```
 
 Currently `pnpm dev` / `pnpm start` only serve `GET /healthz` — enough to prove
 the package builds, runs, and resolves `@pymthouse/builder-sdk`. The

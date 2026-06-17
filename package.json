@@ -9,15 +9,17 @@
   },
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file=.env src/index.ts",
     "build:packages": "pnpm --filter @pymthouse/konnect-metering build",
     "build": "pnpm run build:packages && tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "node --env-file=.env dist/index.js",
     "typecheck": "pnpm run build:packages && tsc",
     "lint": "eslint .",
     "test": "pnpm run build:packages && vitest run",
     "format": "prettier . --write",
-    "format:check": "prettier . --check"
+    "format:check": "prettier . --check",
+    "openmeter:bootstrap": "tsx --env-file=.env scripts/openmeter-bootstrap.ts",
+    "provision:customer": "tsx --env-file=.env scripts/provision-customer.ts"
   },
   "dependencies": {
     "@openmeter/sdk": "^1.0.0-beta.228",
