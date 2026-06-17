@@ -1,0 +1,13 @@
+# Build output (binary at repo root)
+/clearinghouse-bootstrap
+/clearinghouse-bootstrap.exe
+dist/
+
+# Environment / secrets
+.env
+.env.livepeer
+sdk-config.json
+
+# Go
+/vendor/
+node_modules/

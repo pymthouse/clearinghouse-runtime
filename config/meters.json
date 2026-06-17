@@ -1,0 +1,34 @@
+{
+  "createSignedTicketEventType": "create_signed_ticket",
+  "signedTicketEventSource": "go-livepeer-remote-signer",
+  "defaultTrialFeatureKey": "network_spend",
+  "defaultBillableFeatureKey": "billable_spend",
+  "networkFeeUsdMicrosMeter": "network_fee_usd_micros",
+  "billableUsdMicrosMeter": "billable_usd_micros",
+  "signedTicketCountMeter": "signed_ticket_count",
+  "dimensions": {
+    "client_id": "$.client_id",
+    "external_user_id": "$.external_user_id",
+    "pipeline": "$.pipeline",
+    "model_id": "$.model_id"
+  },
+  "meters": {
+    "networkFeeUsdMicros": {
+      "openmeterDescription": "Livepeer signed-ticket network fee (USD micros) — SUM of signer computed_fee_usd_micros; grouped by client, user, pipeline, model",
+      "konnectName": "Network fee (USD micros)",
+      "konnectDescription": "Livepeer signed-ticket network fee (USD micros) — sum of signer computed_fee_usd_micros; grouped by client, user, pipeline, model",
+      "valueProperty": "$.network_fee_usd_micros"
+    },
+    "billableUsdMicros": {
+      "openmeterDescription": "Billable usage (USD micros) after pipeline/model markup — SUM of billable_usd_micros; grouped by client, user, pipeline, model",
+      "konnectName": "Billable usage (USD micros)",
+      "konnectDescription": "Post-markup billable amount in USD micros for pay-per-use billing",
+      "valueProperty": "$.billable_usd_micros"
+    },
+    "signedTicketCount": {
+      "openmeterDescription": "Signed ticket count per user",
+      "konnectName": "Signed ticket count",
+      "konnectDescription": "Signed ticket count per user"
+    }
+  }
+}
