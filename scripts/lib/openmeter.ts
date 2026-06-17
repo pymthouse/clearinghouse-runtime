@@ -6,9 +6,16 @@ import {
   normalizeKonnectMeteringUrl,
 } from "./konnect-metering.js";
 import {
+  BILLABLE_USD_MICROS_METER,
+  DEFAULT_BILLABLE_FEATURE_KEY,
   DEFAULT_TRIAL_FEATURE_KEY,
   OPENMETER_METER_DEFINITIONS,
 } from "./meters.js";
+import {
+  billableFeatureKey,
+  defaultPlanKey,
+  getPricingConfig,
+} from "./pricing.js";
 
 async function waitForOpenMeterHealthy(
   baseUrl: string,
@@ -61,21 +68,38 @@ async function bootstrapLegacyOpenMeter(opts: {
     console.log(`[openmeter] created meter ${meter.slug}`);
   }
 
-  const featureKey = opts.trialFeatureKey?.trim() || DEFAULT_TRIAL_FEATURE_KEY;
-  try {
-    const features = await client.features.list();
-    const hasFeature = (features || []).some((f) => f.key === featureKey);
-    if (!hasFeature) {
-      await client.features.create({
-        key: featureKey,
-        name: "Network spend",
-        meterSlug: "network_fee_usd_micros",
-      });
-      console.log(`[openmeter] created feature ${featureKey}`);
+  const networkFeatureKey = opts.trialFeatureKey?.trim() || DEFAULT_TRIAL_FEATURE_KEY;
+  const billableFeatureKeyResolved =
+    billableFeatureKey() || DEFAULT_BILLABLE_FEATURE_KEY;
+
+  for (const [key, name, meterSlug] of [
+    [networkFeatureKey, "Network spend", "network_fee_usd_micros"] as const,
+    [billableFeatureKeyResolved, "Billable spend", BILLABLE_USD_MICROS_METER] as const,
+  ]) {
+    try {
+      const features = await client.features.list();
+      const hasFeature = (features || []).some((f) => f.key === key);
+      if (!hasFeature) {
+        await client.features.create({
+          key,
+          name,
+          meterSlug,
+        });
+        console.log(`[openmeter] created feature ${key}`);
+      } else {
+        console.log(`[openmeter] feature exists: ${key}`);
+      }
+    } catch (err) {
+      console.warn(`[openmeter] feature bootstrap skipped for ${key}:`, err);
     }
-  } catch (err) {
-    console.warn("[openmeter] feature bootstrap skipped:", err);
   }
+
+  console.log(
+    "[openmeter] Default pay-per-use plan bootstrap is Konnect-only; self-hosted plan API skipped.",
+  );
+  console.log(
+    `[openmeter] Target plan key when using Konnect: ${defaultPlanKey()}`,
+  );
 }
 
 export async function bootstrapOpenMeter(opts: {
@@ -83,6 +107,11 @@ export async function bootstrapOpenMeter(opts: {
   apiKey?: string;
   trialFeatureKey?: string;
 }): Promise<void> {
+  const pricing = getPricingConfig();
+  console.log(
+    `[bootstrap] pricing: plan=${defaultPlanKey()} billable_feature=${billableFeatureKey()} trial_micros=${pricing.defaultTrialIncludedUsdMicros}`,
+  );
+
   if (isKonnectMeteringUrl(opts.baseUrl, opts.apiKey)) {
     if (!opts.apiKey?.trim()) {
       throw new Error(

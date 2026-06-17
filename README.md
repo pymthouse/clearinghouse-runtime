@@ -113,6 +113,8 @@ pnpm start      # run the compiled server
 | `pnpm lint`                         | ESLint, zero warnings                |
 | `pnpm test`                         | Vitest                               |
 | `pnpm format` / `pnpm format:check` | Prettier                             |
+| `pnpm openmeter:bootstrap`          | Konnect/OpenMeter catalog + default PPU plan |
+| `pnpm provision:customer`           | Auth0 customer + default plan subscription   |
 
 Currently `pnpm dev` / `pnpm start` only serve `GET /healthz` — enough to prove
 the package builds, runs, and resolves `@pymthouse/builder-sdk`. The

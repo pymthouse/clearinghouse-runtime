@@ -6,11 +6,19 @@ type MeterConfig = {
   createSignedTicketEventType: string;
   signedTicketEventSource: string;
   defaultTrialFeatureKey: string;
+  defaultBillableFeatureKey: string;
   networkFeeUsdMicrosMeter: string;
+  billableUsdMicrosMeter: string;
   signedTicketCountMeter: string;
   dimensions: Record<string, string>;
   meters: {
     networkFeeUsdMicros: {
+      openmeterDescription: string;
+      konnectName: string;
+      konnectDescription: string;
+      valueProperty: string;
+    };
+    billableUsdMicros: {
       openmeterDescription: string;
       konnectName: string;
       konnectDescription: string;
@@ -46,6 +54,9 @@ function readMeterConfig(): MeterConfig {
       "Invalid meter config: networkFeeUsdMicrosMeter and signedTicketCountMeter are required",
     );
   }
+  if (!config.billableUsdMicrosMeter) {
+    throw new Error("Invalid meter config: billableUsdMicrosMeter is required");
+  }
 
   return config;
 }
@@ -56,8 +67,11 @@ export const CREATE_SIGNED_TICKET_EVENT_TYPE =
   meterConfig.createSignedTicketEventType;
 export const SIGNED_TICKET_EVENT_SOURCE = meterConfig.signedTicketEventSource;
 export const NETWORK_FEE_USD_MICROS_METER = meterConfig.networkFeeUsdMicrosMeter;
+export const BILLABLE_USD_MICROS_METER = meterConfig.billableUsdMicrosMeter;
 export const SIGNED_TICKET_COUNT_METER = meterConfig.signedTicketCountMeter;
 export const DEFAULT_TRIAL_FEATURE_KEY = meterConfig.defaultTrialFeatureKey;
+export const DEFAULT_BILLABLE_FEATURE_KEY =
+  meterConfig.defaultBillableFeatureKey;
 
 const LIVEPEER_DIMENSIONS = meterConfig.dimensions;
 
@@ -68,6 +82,14 @@ export const OPENMETER_METER_DEFINITIONS = [
     eventType: CREATE_SIGNED_TICKET_EVENT_TYPE,
     aggregation: "SUM" as const,
     valueProperty: meterConfig.meters.networkFeeUsdMicros.valueProperty,
+    groupBy: { ...LIVEPEER_DIMENSIONS },
+  },
+  {
+    slug: BILLABLE_USD_MICROS_METER,
+    description: meterConfig.meters.billableUsdMicros.openmeterDescription,
+    eventType: CREATE_SIGNED_TICKET_EVENT_TYPE,
+    aggregation: "SUM" as const,
+    valueProperty: meterConfig.meters.billableUsdMicros.valueProperty,
     groupBy: { ...LIVEPEER_DIMENSIONS },
   },
   {
@@ -87,6 +109,15 @@ export const KONNECT_METER_DEFINITIONS = [
     event_type: CREATE_SIGNED_TICKET_EVENT_TYPE,
     aggregation: "sum" as const,
     value_property: meterConfig.meters.networkFeeUsdMicros.valueProperty,
+    dimensions: { ...LIVEPEER_DIMENSIONS },
+  },
+  {
+    key: BILLABLE_USD_MICROS_METER,
+    name: meterConfig.meters.billableUsdMicros.konnectName,
+    description: meterConfig.meters.billableUsdMicros.konnectDescription,
+    event_type: CREATE_SIGNED_TICKET_EVENT_TYPE,
+    aggregation: "sum" as const,
+    value_property: meterConfig.meters.billableUsdMicros.valueProperty,
     dimensions: { ...LIVEPEER_DIMENSIONS },
   },
   {

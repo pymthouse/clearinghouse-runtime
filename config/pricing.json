@@ -1,0 +1,11 @@
+{
+  "defaultTrialIncludedUsdMicros": "5000000",
+  "defaultPlanKey": "clearinghouse-default-ppu",
+  "billableFeatureKey": "billable_spend",
+  "billableMeterKey": "billable_usd_micros",
+  "unitPriceUsdPerBillableMicro": "0.000001",
+  "markupRules": [
+    { "pipeline": "*", "model_id": "*", "markupPercent": 0 },
+    { "pipeline": "live-video-to-video", "model_id": "*", "markupPercent": 15 }
+  ]
+}

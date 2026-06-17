@@ -1,8 +1,12 @@
 import {
+  BILLABLE_USD_MICROS_METER,
+  DEFAULT_BILLABLE_FEATURE_KEY,
   DEFAULT_TRIAL_FEATURE_KEY,
   KONNECT_METER_DEFINITIONS,
   NETWORK_FEE_USD_MICROS_METER,
 } from "./meters.js";
+import { ensureKonnectDefaultPayPerUsePlan } from "./konnect-default-plan.js";
+import { getPricingConfig } from "./pricing.js";
 
 export const DEFAULT_KONNECT_METERING_URL =
   "https://us.api.konghq.com/v3/openmeter";
@@ -100,6 +104,37 @@ async function waitForKonnectHealthy(
   throw new Error(`Konnect Metering & Billing not reachable at ${baseUrl}`);
 }
 
+async function ensureKonnectFeature(
+  baseUrl: string,
+  apiKey: string,
+  input: {
+    featureKey: string;
+    name: string;
+    meterId: string;
+  },
+): Promise<void> {
+  const features = await konnectFetch<PageResponse<KonnectFeature>>(
+    baseUrl,
+    apiKey,
+    "/features",
+  );
+  const hasFeature = (features.data ?? []).some((f) => f.key === input.featureKey);
+  if (hasFeature) {
+    console.log(`[konnect] feature exists: ${input.featureKey}`);
+    return;
+  }
+
+  await konnectFetch<KonnectFeature>(baseUrl, apiKey, "/features", {
+    method: "POST",
+    body: JSON.stringify({
+      key: input.featureKey,
+      name: input.name,
+      meter: { id: input.meterId },
+    }),
+  });
+  console.log(`[konnect] created feature ${input.featureKey}`);
+}
+
 export async function bootstrapKonnectMetering(opts: {
   baseUrl: string;
   apiKey: string;
@@ -107,6 +142,7 @@ export async function bootstrapKonnectMetering(opts: {
 }): Promise<void> {
   const baseUrl = normalizeKonnectMeteringUrl(opts.baseUrl);
   const apiKey = opts.apiKey.trim();
+  const pricing = getPricingConfig();
 
   await waitForKonnectHealthy(baseUrl, apiKey);
 
@@ -147,32 +183,54 @@ export async function bootstrapKonnectMetering(opts: {
     (m) => m.key === NETWORK_FEE_USD_MICROS_METER,
   );
   if (!networkFeeMeter) {
-    console.warn(
-      `[konnect] meter ${NETWORK_FEE_USD_MICROS_METER} not found — skipping feature bootstrap`,
-    );
-    return;
+    throw new Error(`Konnect meter missing: ${NETWORK_FEE_USD_MICROS_METER}`);
   }
 
-  const featureKey = opts.trialFeatureKey?.trim() || DEFAULT_TRIAL_FEATURE_KEY;
-  try {
-    const features = await konnectFetch<PageResponse<KonnectFeature>>(
-      baseUrl,
-      apiKey,
-      "/features",
-    );
-    const hasFeature = (features.data ?? []).some((f) => f.key === featureKey);
-    if (!hasFeature) {
-      await konnectFetch<KonnectFeature>(baseUrl, apiKey, "/features", {
-        method: "POST",
-        body: JSON.stringify({
-          key: featureKey,
-          name: "Network spend",
-          meter: { id: networkFeeMeter.id },
-        }),
-      });
-      console.log(`[konnect] created feature ${featureKey}`);
-    }
-  } catch (err) {
-    console.warn("[konnect] feature bootstrap skipped:", err);
+  const billableMeter = (refreshed.data ?? []).find(
+    (m) => m.key === BILLABLE_USD_MICROS_METER,
+  );
+  if (!billableMeter) {
+    throw new Error(`Konnect meter missing: ${BILLABLE_USD_MICROS_METER}`);
   }
+
+  const networkFeatureKey = opts.trialFeatureKey?.trim() || DEFAULT_TRIAL_FEATURE_KEY;
+  try {
+    await ensureKonnectFeature(baseUrl, apiKey, {
+      featureKey: networkFeatureKey,
+      name: "Network spend",
+      meterId: networkFeeMeter.id,
+    });
+  } catch (err) {
+    console.warn("[konnect] network_spend feature bootstrap skipped:", err);
+  }
+
+  const billableFeatureKeyResolved =
+    pricing.billableFeatureKey.trim() || DEFAULT_BILLABLE_FEATURE_KEY;
+  try {
+    await ensureKonnectFeature(baseUrl, apiKey, {
+      featureKey: billableFeatureKeyResolved,
+      name: "Billable spend",
+      meterId: billableMeter.id,
+    });
+  } catch (err) {
+    console.warn("[konnect] billable_spend feature bootstrap skipped:", err);
+  }
+
+  const plan = await ensureKonnectDefaultPayPerUsePlan({
+    baseUrl,
+    apiKey,
+    billableMeterId: billableMeter.id,
+    pricing,
+  });
+
+  console.log(
+    "[konnect] Per-customer subscriptions are created at provision time:",
+  );
+  console.log(`  - default plan: ${plan.planKey} (${plan.planId})`);
+  console.log(
+    `  - pnpm provision:customer -- --client-id <AUTH0_PUBLIC_CLIENT_ID> --external-user-id <auth0|sub>`,
+  );
+  console.log(
+    "  - Customer key format: {client_id}:{external_user_id} (Auth0 azp:sub)",
+  );
 }

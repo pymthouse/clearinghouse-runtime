@@ -56,10 +56,14 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) or OpenMeter API key |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
+| `OPENMETER_DEFAULT_PLAN_KEY` | no | `clearinghouse-default-ppu` | Default pay-per-use plan key (Konnect) |
+| `OPENMETER_DEFAULT_STARTER_INCLUDED_USD_MICROS` | no | `5000000` | Per-customer trial credit ($5) on billable usage |
+| `PRICING_CONFIG_PATH` | no | `config/pricing.json` | Markup rules + plan defaults for bootstrap/collector |
+| `AUTH0_PUBLIC_CLIENT_ID` | no | — | Auth0 SPA client id for `provision:customer` default `--client-id` |
 
 ## OpenMeter/Konnect bootstrap
 
-Provision meters and features before starting the collector:
+Provision meters, features, and the default pay-per-use plan before starting the collector:
 
 ```bash
 OPENMETER_URL=https://us.api.konghq.com/v3/openmeter \
@@ -67,13 +71,69 @@ OPENMETER_API_KEY=kpat_... \
 pnpm openmeter:bootstrap
 ```
 
-Creates:
-- `network_fee_usd_micros` meter (SUM, dimensions: `client_id`/`external_user_id`/`pipeline`/`model_id`)
-- `signed_ticket_count` meter (COUNT)
-- `network_spend` feature (linked to `network_fee_usd_micros`)
+Creates (additive — existing pymthouse objects are untouched):
+
+| Object | Key | Purpose |
+|--------|-----|---------|
+| Meter (existing) | `network_fee_usd_micros` | Raw network cost from signer |
+| Meter (new) | `billable_usd_micros` | Post-markup billable amount (collector phase 2) |
+| Meter (existing) | `signed_ticket_count` | Request counts |
+| Feature (existing) | `network_spend` | pymthouse-compatible network feature |
+| Feature (new) | `billable_spend` | Billable usage feature |
+| Plan (new) | `clearinghouse-default-ppu` | Pay-per-use: $0.000001/billable micro + **$5 included usage** |
 
 Idempotent — safe to re-run. Konnect and self-hosted OpenMeter both supported
 (detected by API key prefix `kpat_`/`spat_` or URL containing `konghq.com`).
+Self-hosted bootstrap creates billable meters/features only; **plan creation is Konnect-only**.
+
+### Two-meter billing model
+
+```text
+Signer computed_fee (wei)
+  → collector: network_fee_usd_micros   (raw network cost — observability)
+  → collector: billable_usd_micros      (network × pipeline/model markup — billing)
+       → billable_spend feature
+            → clearinghouse-default-ppu subscription per customer
+```
+
+Markup rules live in [`config/pricing.json`](../config/pricing.json). Collector
+pipeline config: [`deploy/openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
+The collector does not yet emit `billable_usd_micros` (phase 2); until then the billable meter
+stays empty while the catalog is ready.
+
+### Auth0 identity contract
+
+Matches [auth0-livepeer](https://github.com/livepeer/auth0-livepeer) bootstrap:
+
+- Webhook returns `auth_id = "{azp}:{sub}"` (`CLAIM_CLIENT_ID=azp`, `USAGE_SUBJECT_TYPE=auth0_user_id`)
+- Collector splits on first colon → `client_id` / `external_user_id`
+- Konnect customer key: `{AUTH0_PUBLIC_CLIENT_ID}:{auth0|sub}`
+
+Example customer key: `abc123xyz:auth0|user456`
+
+### Per-customer provision
+
+After bootstrap, attach the default plan to each Auth0 user:
+
+```bash
+AUTH0_PUBLIC_CLIENT_ID=... \
+OPENMETER_URL=https://us.api.konghq.com/v3/openmeter \
+OPENMETER_API_KEY=kpat_... \
+pnpm provision:customer -- --external-user-id 'auth0|user456'
+```
+
+Or pass `--client-id` explicitly. Creates Konnect customer + subscription idempotently.
+The subscription rate card shows included usage (e.g. **5,000,000 free units**) on billable spend.
+
+### Coexistence with pymthouse
+
+| Object | pymthouse | clearinghouse |
+|--------|-----------|---------------|
+| `network_fee_usd_micros` | shared | unchanged |
+| `network_spend` + Starter plan | yes | unchanged |
+| `billable_usd_micros` / `billable_spend` / `clearinghouse-default-ppu` | — | new |
+
+No existing meters or features are deleted or recreated.
 
 ## Railway deploy
 
