@@ -20,6 +20,7 @@
     "format:check": "prettier . --check"
   },
   "dependencies": {
+    "@openmeter/sdk": "^1.0.0-beta.228",
     "@pymthouse/builder-sdk": "^0.4.1",
     "@pymthouse/konnect-metering": "workspace:*"
   },
