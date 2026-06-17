@@ -70,9 +70,23 @@ make cross   # builds linux/darwin/windows on amd64/arm64 into dist/
 Tagged releases (`v*`) are built and published via GitHub Actions
 (`.github/workflows/release.yml`).
 
-## Follow-ups (out of scope for this PR)
+## Runtime stack (Docker Compose)
+
+After bootstrap, start the local runtime: Kafka → go-livepeer remote signer →
+OpenMeter/Benthos collector.
+
+```bash
+# Bootstrap writes WEBHOOK_SECRET + Konnect vars to .env.livepeer.
+# Add REMOTE_SIGNER_WEBHOOK_URL and OPENMETER_INGEST_URL, then:
+make stack-up ENV_FILE=.env.livepeer
+make stack-logs ENV_FILE=.env.livepeer
+make stack-down ENV_FILE=.env.livepeer
+```
+
+See [`deploy/README.md`](deploy/README.md) for env vars, Railway deploy scripts,
+and architecture notes.
+
+## Follow-ups (out of scope)
 
 - Per-customer provisioning (customers + subscriptions)
 - Self-hosted OpenMeter adapter
-- Benthos collector / Docker Compose stack
-- Railway deploy scripts
