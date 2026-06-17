@@ -1,0 +1,34 @@
+{
+  "name": "@pymthouse/konnect-metering",
+  "version": "0.1.0",
+  "description": "Typed Konnect Metering & Billing client generated from OpenAPI (openapi-typescript + openapi-fetch)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "generate": "openapi-typescript \"https://raw.githubusercontent.com/Kong/developer.konghq.com/main/api-specs/konnect/metering-and-billing/v3/openapi.yaml\" -o src/schema.gen.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.14.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "openapi-typescript": "^7.8.0",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.4"
+  }
+}

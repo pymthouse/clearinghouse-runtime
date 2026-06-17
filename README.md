@@ -19,6 +19,12 @@ minting, the direct-DMZ signer proxy, and OpenMeter-backed usage/allowance
 helpers. **This repo is the reference application that wires those pieces
 together** — the thing a platform operator clones, configures, and runs.
 
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| [`@pymthouse/konnect-metering`](packages/konnect-metering/) | OpenAPI-generated typed client for Konnect Metering & Billing v3 |
+
 ## Status
 
 This is the scaffolding for [Deliverable
