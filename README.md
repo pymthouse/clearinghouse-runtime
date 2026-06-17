@@ -72,16 +72,21 @@ Tagged releases (`v*`) are built and published via GitHub Actions
 
 ## Runtime stack (Docker Compose)
 
-After bootstrap, start the local runtime: Kafka → go-livepeer remote signer →
-OpenMeter/Benthos collector.
+After bootstrap, start the local runtime: **identity webhook** → Kafka →
+go-livepeer remote signer → OpenMeter/Benthos collector.
+
+Bootstrap writes `REMOTE_SIGNER_WEBHOOK_URL` (defaults to the in-compose
+`identity-webhook` service), `OPENMETER_INGEST_URL`, and Auth0 JWT vars to
+`.env.livepeer`.
 
 ```bash
-# Bootstrap writes WEBHOOK_SECRET + Konnect vars to .env.livepeer.
-# Add REMOTE_SIGNER_WEBHOOK_URL and OPENMETER_INGEST_URL, then:
 make stack-up ENV_FILE=.env.livepeer
 make stack-logs ENV_FILE=.env.livepeer
 make stack-down ENV_FILE=.env.livepeer
 ```
+
+For production, set `PLATFORM_URL` before bootstrap to target
+`{PLATFORM_URL}/webhooks/remote-signer` on Vercel instead.
 
 See [`deploy/README.md`](deploy/README.md) for env vars, Railway deploy scripts,
 and architecture notes.

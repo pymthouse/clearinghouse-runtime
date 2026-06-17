@@ -1,14 +1,18 @@
 # clearinghouse deploy/
 
 Docker Compose stack + Railway deploy scripts for the clearinghouse runtime:
-**Kafka/Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
+**identity webhook → Kafka/Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
 
 ## Design decisions
 
 **No Apache DMZ.** The remote signer container runs `go-livepeer` directly —
 there is no Apache reverse proxy or `mod_authnz_jwt` layer in front of it.
-Identity validation is handled by the `-remoteSignerWebhookUrl` hook (your
-`/authorize` endpoint) and the shared `WEBHOOK_SECRET`.
+Identity validation is handled by the `-remoteSignerWebhookUrl` hook (`POST
+/authorize` on the `identity-webhook` service) and the shared `WEBHOOK_SECRET`.
+
+The `identity-webhook` container runs `@pymthouse/builder-sdk`'s OIDC handler:
+it validates Auth0 JWTs via JWKS and returns `auth_id = "{azp}:{sub}"` to the
+signer. No database or local identity storage required.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to
 `127.0.0.1:4935` inside the container and is never published or mapped to the
@@ -22,10 +26,9 @@ cp .env.example .env
 $EDITOR .env    # Auth0 + Konnect bootstrap secrets
 
 make build
-./clearinghouse-bootstrap    # writes .env.livepeer (WEBHOOK_SECRET, Konnect vars)
+./clearinghouse-bootstrap    # writes .env.livepeer (JWT_*, WEBHOOK_SECRET, REMOTE_SIGNER_WEBHOOK_URL, Konnect vars)
 
-# Add runtime-only vars to .env.livepeer (see .env.example comments):
-#   REMOTE_SIGNER_WEBHOOK_URL, OPENMETER_INGEST_URL, SIGNER_ETH_ADDR
+# Optional: set SIGNER_ETH_ADDR in .env.livepeer before starting the stack
 
 make stack-up ENV_FILE=.env.livepeer
 make stack-logs ENV_FILE=.env.livepeer
@@ -35,7 +38,7 @@ make stack-down ENV_FILE=.env.livepeer
 Kafka + signer only (no metering):
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file .env.livepeer up -d --build kafka remote-signer
+docker compose -f deploy/docker-compose.yml --env-file .env.livepeer up -d --build kafka identity-webhook remote-signer
 ```
 
 Verify CLI port is not published:
@@ -51,15 +54,17 @@ docker compose -f deploy/docker-compose.yml --env-file .env.livepeer port remote
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `REMOTE_SIGNER_WEBHOOK_URL` | yes | — | Identity webhook URL (`/authorize` endpoint) |
-| `WEBHOOK_SECRET` | yes | — | Shared secret passed as `Authorization: Bearer` to the webhook (from bootstrap) |
+| `REMOTE_SIGNER_WEBHOOK_URL` | no | `http://identity-webhook:8090/authorize` | Identity webhook (`POST /authorize`) |
+| `WEBHOOK_SECRET` | yes | — | Shared secret for signer → webhook auth (from bootstrap) |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | yes | — | Auth0 issuer + API audience (from bootstrap) |
+| `PLATFORM_URL` | no | — | Bootstrap input: sets production webhook to `{PLATFORM_URL}/webhooks/remote-signer` |
 | `SIGNER_NETWORK` | no | `arbitrum-one-mainnet` | go-livepeer `-network` |
 | `ETH_RPC_URL` | no | public arb1 endpoint | Arbitrum RPC |
 | `SIGNER_ETH_ADDR` | no | — | Funded signer Ethereum address |
 | `SIGNER_HOST_PORT` | no | `8081` | Host port for the signing HTTP endpoint |
 | `KAFKA_GATEWAY_TOPIC` | no | `livepeer-gateway-events` | Kafka topic |
 | `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (from bootstrap) |
-| `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
+| `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` — from bootstrap) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
 | `AUTH0_PUBLIC_CLIENT_ID` | no | — | Auth0 public client id (from bootstrap) |

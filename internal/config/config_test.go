@@ -43,6 +43,9 @@ func TestParseMinimal(t *testing.T) {
 	if cfg.WebhookSecret == "" {
 		t.Error("expected auto-generated webhook secret")
 	}
+	if cfg.RemoteSignerWebhookURL != DefaultDockerWebhookURL {
+		t.Errorf("RemoteSignerWebhookURL = %s, want %s", cfg.RemoteSignerWebhookURL, DefaultDockerWebhookURL)
+	}
 }
 
 func TestParseMissingAuth0(t *testing.T) {

@@ -16,7 +16,8 @@ func TestBuildEnvFile(t *testing.T) {
 		OpenmeterURL:    "https://us.api.konghq.com/v3/openmeter",
 		OpenmeterAPIKey: "kpat_test123",
 		TrialFeatureKey: "network_spend",
-		WebhookSecret:   "deadbeef",
+		WebhookSecret:          "deadbeef",
+		RemoteSignerWebhookURL: config.DefaultDockerWebhookURL,
 	}
 	auth0Result := &auth0.ProvisionResult{
 		APIIdentifier:   "livepeer",

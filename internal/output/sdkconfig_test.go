@@ -14,7 +14,8 @@ func TestBuildSDKConfig(t *testing.T) {
 	cfg := &config.BootstrapConfig{
 		Auth0Domain:     "test.us.auth0.com",
 		OpenmeterURL:    "https://us.api.konghq.com/v3/openmeter",
-		TrialFeatureKey: "network_spend",
+		TrialFeatureKey:        "network_spend",
+		RemoteSignerWebhookURL: config.DefaultDockerWebhookURL,
 	}
 	auth0Result := &auth0.ProvisionResult{
 		APIIdentifier:   "livepeer",

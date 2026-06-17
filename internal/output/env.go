@@ -29,15 +29,18 @@ func BuildEnvFile(cfg *config.BootstrapConfig, auth0Result *auth0.ProvisionResul
 		fmt.Fprintf(&b, "JWT_AUDIENCE=%s\n", auth0Result.APIIdentifier)
 		fmt.Fprintf(&b, "WEBHOOK_SECRET=%s\n", cfg.WebhookSecret)
 		b.WriteString("CLAIM_CLIENT_ID=azp\n")
-		b.WriteString("USAGE_SUBJECT_TYPE=auth0_user_id\n\n")
+		b.WriteString("USAGE_SUBJECT_TYPE=auth0_user_id\n")
+		fmt.Fprintf(&b, "REMOTE_SIGNER_WEBHOOK_URL=%s\n\n", cfg.RemoteSignerWebhookURL)
 	}
 
 	if !cfg.SkipOpenMeter {
 		b.WriteString("# Konnect Metering & Billing\n")
-		fmt.Fprintf(&b, "OPENMETER_URL=%s\n", strings.TrimSuffix(cfg.OpenmeterURL, "/"))
+		openmeterURL := strings.TrimSuffix(cfg.OpenmeterURL, "/")
+		fmt.Fprintf(&b, "OPENMETER_URL=%s\n", openmeterURL)
 		if cfg.OpenmeterAPIKey != "" {
 			fmt.Fprintf(&b, "OPENMETER_API_KEY=%s\n", cfg.OpenmeterAPIKey)
 		}
+		fmt.Fprintf(&b, "OPENMETER_INGEST_URL=%s\n", config.OpenMeterIngestURL(openmeterURL))
 		fmt.Fprintf(&b, "OPENMETER_TRIAL_FEATURE_KEY=%s\n", cfg.TrialFeatureKey)
 	}
 

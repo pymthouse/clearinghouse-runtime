@@ -11,3 +11,4 @@ sdk-config.json
 # Go
 /vendor/
 node_modules/
+deploy/identity-webhook/node_modules/

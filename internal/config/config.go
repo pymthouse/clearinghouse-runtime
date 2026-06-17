@@ -23,7 +23,9 @@ type BootstrapConfig struct {
 	TrialFeatureKey string
 
 	// Identity webhook (auto-generated when unset)
-	WebhookSecret string
+	WebhookSecret            string
+	PlatformURL              string
+	RemoteSignerWebhookURL   string
 
 	// Output
 	OutputPath          string
@@ -68,8 +70,10 @@ func loadFromEnv() *BootstrapConfig {
 		OpenmeterURL:          envOr("OPENMETER_URL", "https://us.api.konghq.com/v3/openmeter"),
 		OpenmeterAPIKey:       envOr("OPENMETER_API_KEY", ""),
 		TrialFeatureKey:       envOr("OPENMETER_TRIAL_FEATURE_KEY", "network_spend"),
-		WebhookSecret:         envOr("WEBHOOK_SECRET", ""),
-		OutputPath:            envOr("BOOTSTRAP_OUTPUT", ".env.livepeer"),
+		WebhookSecret:          envOr("WEBHOOK_SECRET", ""),
+		PlatformURL:            envOr("PLATFORM_URL", ""),
+		RemoteSignerWebhookURL: envOr("REMOTE_SIGNER_WEBHOOK_URL", ""),
+		OutputPath:             envOr("BOOTSTRAP_OUTPUT", ".env.livepeer"),
 		SDKConfigOutputPath:   envOr("SDK_CONFIG_OUTPUT", "sdk-config.json"),
 		MetersConfigPath:      envOr("METERS_CONFIG_PATH", "config/meters.json"),
 		PricingConfigPath:     envOr("PRICING_CONFIG_PATH", "config/pricing.json"),
@@ -93,6 +97,11 @@ func Parse(args []string) (*BootstrapConfig, error) {
 	if cfg.WebhookSecret == "" {
 		cfg.WebhookSecret = randomHex(24)
 	}
+
+	cfg.RemoteSignerWebhookURL = ResolveRemoteSignerWebhookURL(
+		cfg.PlatformURL,
+		cfg.RemoteSignerWebhookURL,
+	)
 
 	if !cfg.SkipAuth0 {
 		if cfg.Auth0Domain == "" {

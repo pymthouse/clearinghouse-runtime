@@ -9,11 +9,8 @@ import (
 )
 
 // Placeholder platform URLs — update after Vercel deploy (not configured by bootstrap).
-const (
-	defaultSignerProxyURL         = "https://your-platform.vercel.app/api/signer"
-	defaultSignerPublicURL        = "https://signer.your-domain.com"
-	defaultRemoteSignerWebhookURL = "https://your-platform.vercel.app/webhooks/remote-signer"
-)
+const defaultSignerProxyURL = "https://your-platform.vercel.app/api/signer"
+const defaultSignerPublicURL = "https://signer.your-domain.com"
 
 type SDKConfig struct {
 	Auth0        SDKAuth0        `json:"auth0"`
@@ -60,7 +57,7 @@ func BuildSDKConfig(cfg *config.BootstrapConfig, auth0Result *auth0.ProvisionRes
 			Audience:  auth0Result.APIIdentifier,
 		},
 		RemoteSigner: SDKRemoteSigner{
-			WebhookURL: defaultRemoteSignerWebhookURL,
+			WebhookURL: cfg.RemoteSignerWebhookURL,
 		},
 	}
 

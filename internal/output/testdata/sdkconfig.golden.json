@@ -12,7 +12,7 @@
     "audience": "livepeer"
   },
   "remoteSigner": {
-    "webhookUrl": "https://your-platform.vercel.app/webhooks/remote-signer"
+    "webhookUrl": "http://identity-webhook:8090/authorize"
   },
   "openmeter": {
     "url": "https://us.api.konghq.com/v3/openmeter",
