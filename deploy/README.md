@@ -148,7 +148,29 @@ curl -X POST http://localhost:8090/admin/customers \
 
 Per-customer provisioning via the Go CLI is a follow-up.
 
-## Railway deploy
+### Multi-tenant platform evolution
+
+This compose stack is **single-tenant**: one `AUTH0_PUBLIC_CLIENT_ID`, one Konnect
+credential set, one default plan. That matches a dedicated clearinghouse deployment
+(one app, one Auth0 tenant).
+
+For a **multi-tenant platform** (many apps / Auth0 clients under one operator):
+
+| Concern | Single-tenant (this stack) | Multi-tenant (platform app) |
+|---------|---------------------------|-----------------------------|
+| Konnect credentials | Global env (`OPENMETER_*`) | Per-app DB config (see pymthouse `appOpenMeterConfig`) |
+| Customer provision | identity-webhook lazy + `/admin/customers` | Platform API e.g. `POST /api/v1/apps/{id}/users` |
+| Plan key | `OPENMETER_DEFAULT_PLAN_KEY` env | Per-app plan resolver |
+| builder-sdk role | Injected `BillingProvisionerPort` at webhook | Same ports; app resolves tenant per `clientId` |
+
+Reference implementation: pymthouse [`client-factory.ts`](https://github.com/pymthouse/pymthouse/blob/main/src/lib/openmeter/client-factory.ts) and [`apps/[id]/users/route.ts`](https://github.com/pymthouse/pymthouse/blob/main/src/app/api/v1/apps/[id]/users/route.ts).
+
+builder-sdk docs: [ARCHITECTURE.md](https://github.com/pymthouse/builder-sdk/blob/main/docs/ARCHITECTURE.md).
+
+The identity-webhook service should remain a **thin verifier + injected provisioners**;
+long-term admin CRUD belongs in the clearinghouse/pymthouse app layer when supporting
+multiple tenants.
+
 
 ### One-time setup
 

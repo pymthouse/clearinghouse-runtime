@@ -1,6 +1,9 @@
 import { createServer } from "node:http";
-import { createAuth0ManagementClient } from "@pymthouse/builder-sdk/auth0/management";
-import { createOpenMeterClient } from "@pymthouse/builder-sdk/billing/openmeter";
+import { createAuth0ManagementClient, createAuth0UserProvisioner } from "@pymthouse/builder-sdk/auth0/management";
+import {
+  createOpenMeterBillingProvisioner,
+  createOpenMeterClient,
+} from "@pymthouse/builder-sdk/billing/openmeter";
 import {
   createAuth0BillingWebhookConfig,
   routeRemoteSignerWebhookRequest,
@@ -27,16 +30,28 @@ function buildConfig() {
     apiKey: required("OPENMETER_API_KEY"),
   });
 
+  const defaultPlanKey = required("OPENMETER_DEFAULT_PLAN_KEY");
+  const billingClientId = required("AUTH0_PUBLIC_CLIENT_ID");
+
+  const billingProvisioner = createOpenMeterBillingProvisioner({
+    client: openMeterClient,
+    resolvePlanKey: () => defaultPlanKey,
+  });
+
   const mgmtClientId = optional("AUTH0_MGMT_CLIENT_ID");
   const mgmtClientSecret = optional("AUTH0_MGMT_CLIENT_SECRET");
   const auth0Domain = optional("AUTH0_DOMAIN");
 
-  const auth0Management =
+  const userProvisioner =
     auth0Domain && mgmtClientId && mgmtClientSecret
-      ? createAuth0ManagementClient({
-          domain: auth0Domain,
-          clientId: mgmtClientId,
-          clientSecret: mgmtClientSecret,
+      ? createAuth0UserProvisioner({
+          management: createAuth0ManagementClient({
+            domain: auth0Domain,
+            clientId: mgmtClientId,
+            clientSecret: mgmtClientSecret,
+          }),
+          defaultConnection:
+            process.env.AUTH0_DEFAULT_CONNECTION?.trim() || "Username-Password-Authentication",
         })
       : undefined;
 
@@ -49,12 +64,9 @@ function buildConfig() {
       usageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "auth0_user_id",
     },
     allowInsecureHttp: true,
-    openMeterClient,
-    billingClientId: required("AUTH0_PUBLIC_CLIENT_ID"),
-    planKey: required("OPENMETER_DEFAULT_PLAN_KEY"),
-    auth0Management,
-    defaultAuth0Connection:
-      process.env.AUTH0_DEFAULT_CONNECTION?.trim() || "Username-Password-Authentication",
+    billingProvisioner,
+    userProvisioner,
+    defaultBillingClientId: billingClientId,
     strictBillingProvision: process.env.STRICT_BILLING_PROVISION === "1",
     onBillingProvisionError: (err, identity) => {
       console.warn(

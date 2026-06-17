@@ -89,4 +89,5 @@ For production, set `PLATFORM_URL` before bootstrap to target
 `{PLATFORM_URL}/webhooks/remote-signer` on Vercel instead.
 
 See [`deploy/README.md`](deploy/README.md) for env vars, Railway deploy scripts,
-and architecture notes.
+and architecture notes. Multi-tenant billing boundaries:
+[`docs/MULTI_TENANT_BILLING.md`](docs/MULTI_TENANT_BILLING.md).
