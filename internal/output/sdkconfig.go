@@ -8,6 +8,13 @@ import (
 	"github.com/livepeer/clearinghouse/internal/config"
 )
 
+// Placeholder platform URLs — update after Vercel deploy (not configured by bootstrap).
+const (
+	defaultSignerProxyURL         = "https://your-platform.vercel.app/api/signer"
+	defaultSignerPublicURL        = "https://signer.your-domain.com"
+	defaultRemoteSignerWebhookURL = "https://your-platform.vercel.app/webhooks/remote-signer"
+)
+
 type SDKConfig struct {
 	Auth0        SDKAuth0        `json:"auth0"`
 	Signer       SDKSigner       `json:"signer"`
@@ -48,12 +55,12 @@ func BuildSDKConfig(cfg *config.BootstrapConfig, auth0Result *auth0.ProvisionRes
 			Audience: auth0Result.APIIdentifier,
 		},
 		Signer: SDKSigner{
-			ProxyURL:  cfg.SignerProxyURL,
-			PublicURL: cfg.SignerPublicURL,
+			ProxyURL:  defaultSignerProxyURL,
+			PublicURL: defaultSignerPublicURL,
 			Audience:  auth0Result.APIIdentifier,
 		},
 		RemoteSigner: SDKRemoteSigner{
-			WebhookURL: cfg.RemoteSignerWebhookURL,
+			WebhookURL: defaultRemoteSignerWebhookURL,
 		},
 	}
 

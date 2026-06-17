@@ -3,8 +3,6 @@ package admin
 import (
 	"context"
 	"fmt"
-	"math"
-	"strconv"
 
 	"github.com/livepeer/clearinghouse/internal/meters"
 	"github.com/livepeer/clearinghouse/internal/pricing"
@@ -157,9 +155,6 @@ func BootstrapCatalog(
 	}
 	ensuredFeatures = append(ensuredFeatures, *bfResult)
 
-	included, _ := strconv.ParseFloat(pricingCfg.DefaultTrialIncludedUsdMicros, 64)
-	includedMicros := int(math.Max(0, math.Floor(included)))
-
 	result.Meters = ensuredMeters
 	result.Features = ensuredFeatures
 
@@ -183,7 +178,6 @@ func BootstrapCatalog(
 		FeatureName:      "Billable spend",
 		BillableMetterID: billableMeter.ID,
 		UnitAmount:       pricingCfg.UnitPriceUsdPerBillableMicro,
-		IncludedMicros:   includedMicros,
 		Currency:         "USD",
 		BillingCadence:   "P1M",
 	})

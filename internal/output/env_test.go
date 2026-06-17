@@ -12,28 +12,19 @@ import (
 
 func TestBuildEnvFile(t *testing.T) {
 	cfg := &config.BootstrapConfig{
-		Auth0Domain:            "test.us.auth0.com",
-		OpenmeterURL:           "https://us.api.konghq.com/v3/openmeter",
-		OpenmeterAPIKey:        "kpat_test123",
-		TrialFeatureKey:        "network_spend",
-		WebhookSecret:          "deadbeef",
-		SignerProxyURL:         "https://platform.vercel.app/api/signer",
-		SignerPublicURL:        "https://signer.example.com",
-		RemoteSignerWebhookURL: "https://platform.vercel.app/webhooks/remote-signer",
-		SignerNetwork:          "arbitrum-one-mainnet",
-		EthRPCURL:              "https://arb1.arbitrum.io/rpc",
-		SignerEthAddr:          "0x1234",
-		KafkaBrokers:           "kafka:9092",
-		KafkaGatewayTopic:      "livepeer-gateway-events",
-		EthUsdPrice:            "3500",
+		Auth0Domain:     "test.us.auth0.com",
+		OpenmeterURL:    "https://us.api.konghq.com/v3/openmeter",
+		OpenmeterAPIKey: "kpat_test123",
+		TrialFeatureKey: "network_spend",
+		WebhookSecret:   "deadbeef",
 	}
 	auth0Result := &auth0.ProvisionResult{
-		APIIdentifier:  "livepeer",
-		PublicClientID: "pub_123",
-		M2MClientID:    "m2m_456",
+		APIIdentifier:   "livepeer",
+		PublicClientID:  "pub_123",
+		M2MClientID:     "m2m_456",
 		M2MClientSecret: "secret_789",
-		JwksURL:        "https://test.us.auth0.com/.well-known/jwks.json",
-		Issuer:         "https://test.us.auth0.com/",
+		JwksURL:         "https://test.us.auth0.com/.well-known/jwks.json",
+		Issuer:          "https://test.us.auth0.com/",
 	}
 
 	got := BuildEnvFile(cfg, auth0Result)
@@ -57,19 +48,11 @@ func TestBuildEnvFile(t *testing.T) {
 
 func TestBuildEnvFileSkipAuth0(t *testing.T) {
 	cfg := &config.BootstrapConfig{
-		SkipAuth0:              true,
-		OpenmeterURL:           "https://us.api.konghq.com/v3/openmeter",
-		OpenmeterAPIKey:        "kpat_test",
-		TrialFeatureKey:        "network_spend",
-		WebhookSecret:          "abc",
-		SignerProxyURL:         "https://p.example.com/api/signer",
-		SignerPublicURL:        "https://s.example.com",
-		RemoteSignerWebhookURL: "https://p.example.com/webhooks/remote-signer",
-		SignerNetwork:          "arbitrum-one-mainnet",
-		EthRPCURL:              "https://arb1.arbitrum.io/rpc",
-		KafkaBrokers:           "kafka:9092",
-		KafkaGatewayTopic:      "livepeer-gateway-events",
-		EthUsdPrice:            "3500",
+		SkipAuth0:       true,
+		OpenmeterURL:    "https://us.api.konghq.com/v3/openmeter",
+		OpenmeterAPIKey: "kpat_test",
+		TrialFeatureKey: "network_spend",
+		WebhookSecret:   "abc",
 	}
 
 	got := BuildEnvFile(cfg, nil)

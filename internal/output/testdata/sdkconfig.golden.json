@@ -7,12 +7,12 @@
     "audience": "livepeer"
   },
   "signer": {
-    "proxyUrl": "https://platform.vercel.app/api/signer",
-    "publicUrl": "https://signer.example.com",
+    "proxyUrl": "https://your-platform.vercel.app/api/signer",
+    "publicUrl": "https://signer.your-domain.com",
     "audience": "livepeer"
   },
   "remoteSigner": {
-    "webhookUrl": "https://platform.vercel.app/webhooks/remote-signer"
+    "webhookUrl": "https://your-platform.vercel.app/webhooks/remote-signer"
   },
   "openmeter": {
     "url": "https://us.api.konghq.com/v3/openmeter",

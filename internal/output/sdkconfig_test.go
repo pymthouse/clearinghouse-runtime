@@ -12,20 +12,17 @@ import (
 
 func TestBuildSDKConfig(t *testing.T) {
 	cfg := &config.BootstrapConfig{
-		Auth0Domain:            "test.us.auth0.com",
-		OpenmeterURL:           "https://us.api.konghq.com/v3/openmeter",
-		TrialFeatureKey:        "network_spend",
-		SignerProxyURL:         "https://platform.vercel.app/api/signer",
-		SignerPublicURL:        "https://signer.example.com",
-		RemoteSignerWebhookURL: "https://platform.vercel.app/webhooks/remote-signer",
+		Auth0Domain:     "test.us.auth0.com",
+		OpenmeterURL:    "https://us.api.konghq.com/v3/openmeter",
+		TrialFeatureKey: "network_spend",
 	}
 	auth0Result := &auth0.ProvisionResult{
-		APIIdentifier:  "livepeer",
-		PublicClientID: "pub_123",
-		M2MClientID:    "m2m_456",
+		APIIdentifier:   "livepeer",
+		PublicClientID:  "pub_123",
+		M2MClientID:     "m2m_456",
 		M2MClientSecret: "secret_789",
-		JwksURL:        "https://test.us.auth0.com/.well-known/jwks.json",
-		Issuer:         "https://test.us.auth0.com/",
+		JwksURL:         "https://test.us.auth0.com/.well-known/jwks.json",
+		Issuer:          "https://test.us.auth0.com/",
 	}
 
 	got, err := BuildSDKConfig(cfg, auth0Result)
@@ -46,7 +43,6 @@ func TestBuildSDKConfig(t *testing.T) {
 		t.Fatalf("Missing golden file %s — run with UPDATE_GOLDEN=1 to create", golden)
 	}
 
-	// Normalize for comparison
 	var gotObj, wantObj SDKConfig
 	json.Unmarshal(got, &gotObj)
 	json.Unmarshal(want, &wantObj)

@@ -19,9 +19,8 @@ cp .env.example .env    # fill in secrets — see file for Auth0 + Konnect vars
 ./clearinghouse-bootstrap --skip-openmeter
 ```
 
-The CLI loads `.env` from the current directory automatically. Flags override
-`.env` values. Run `./clearinghouse-bootstrap --help` for CLI flags; see
-`.env.example` for all settings.
+The CLI loads `.env` from the current directory automatically. See
+`.env.example` for settings; run `./clearinghouse-bootstrap --help` for CLI flags.
 
 ## What it does
 
@@ -36,14 +35,15 @@ The CLI loads `.env` from the current directory automatically. Flags override
    plan with a usage rate card. Uses the official
    [`Kong/sdk-konnect-go`](https://github.com/Kong/sdk-konnect-go) SDK.
 
-3. **Output** — writes `.env.livepeer` (all env vars for VM deploy / Docker
-   Compose) and `sdk-config.json` (structured config for Vercel platform deploy
-   via builder-sdk).
+3. **Output** — writes `.env.livepeer` (Auth0 + Konnect runtime vars) and
+   `sdk-config.json` (structured config for Vercel platform deploy via
+   builder-sdk). Signer URLs in `sdk-config.json` are placeholders to update
+   after platform deploy.
 
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in your secrets. The CLI loads `.env`
-automatically (override with `--env-file`). Flags override `.env` values.
+automatically (override with `--env-file`).
 
 If a required value is missing for the selected mode, the CLI exits with an
 error before calling any APIs. See `.env.example` for variable names and
@@ -54,9 +54,6 @@ features, plans) that are not defined in `config/meters.json` and
 `config/pricing.json`, or whose meter dimensions no longer match config.
 Prune runs before ensure/create. **This can delete production billing
 catalog data** — use only when you intend to reconcile the tenant to config.
-
-Deploy template vars (Kafka, signer URLs, ETH RPC) are optional in `.env` — they
-get sensible defaults in `.env.livepeer` output.
 
 ## Config files
 

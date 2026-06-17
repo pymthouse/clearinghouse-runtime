@@ -4,7 +4,9 @@ import "testing"
 
 const testEmptyEnv = "testdata/empty.env"
 
-func parseForTest(args ...string) (*BootstrapConfig, error) {
+func parseForTest(t *testing.T, args ...string) (*BootstrapConfig, error) {
+	t.Helper()
+
 	full := append([]string{"--env-file", testEmptyEnv}, args...)
 	remaining, envFile, explicit, help, err := PreprocessArgs(full)
 	if err != nil {
@@ -20,12 +22,12 @@ func parseForTest(args ...string) (*BootstrapConfig, error) {
 }
 
 func TestParseMinimal(t *testing.T) {
-	cfg, err := parseForTest(
-		"--auth0-domain", "test.auth0.com",
-		"--auth0-mgmt-client-id", "cid",
-		"--auth0-mgmt-client-secret", "csec",
-		"--openmeter-api-key", "kpat_test",
-	)
+	t.Setenv("AUTH0_DOMAIN", "test.auth0.com")
+	t.Setenv("AUTH0_MGMT_CLIENT_ID", "cid")
+	t.Setenv("AUTH0_MGMT_CLIENT_SECRET", "csec")
+	t.Setenv("OPENMETER_API_KEY", "kpat_test")
+
+	cfg, err := parseForTest(t)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -44,14 +46,19 @@ func TestParseMinimal(t *testing.T) {
 }
 
 func TestParseMissingAuth0(t *testing.T) {
-	_, err := parseForTest("--openmeter-api-key", "kpat_test")
+	t.Setenv("AUTH0_DOMAIN", "")
+	t.Setenv("OPENMETER_API_KEY", "kpat_test")
+
+	_, err := parseForTest(t)
 	if err == nil {
 		t.Fatal("expected error for missing auth0 domain")
 	}
 }
 
 func TestParseSkipAuth0(t *testing.T) {
-	cfg, err := parseForTest("--skip-auth0", "--openmeter-api-key", "kpat_test")
+	t.Setenv("OPENMETER_API_KEY", "kpat_test")
+
+	cfg, err := parseForTest(t, "--skip-auth0")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -61,7 +68,7 @@ func TestParseSkipAuth0(t *testing.T) {
 }
 
 func TestParseSkipBoth(t *testing.T) {
-	cfg, err := parseForTest("--skip-auth0", "--skip-openmeter")
+	cfg, err := parseForTest(t, "--skip-auth0", "--skip-openmeter")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}

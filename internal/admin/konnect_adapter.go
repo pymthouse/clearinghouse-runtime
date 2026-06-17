@@ -166,11 +166,6 @@ func (k *KonnectAdmin) ListPlans(ctx context.Context) ([]Plan, error) {
 }
 
 func (k *KonnectAdmin) EnsurePlan(ctx context.Context, input PlanInput) (*Plan, error) {
-	includedMicros := input.IncludedMicros
-	if includedMicros < 0 {
-		includedMicros = 0
-	}
-
 	// Resolve feature ID
 	features, err := k.ListFeatures(ctx)
 	if err != nil {
@@ -195,6 +190,9 @@ func (k *KonnectAdmin) EnsurePlan(ctx context.Context, input PlanInput) (*Plan, 
 		featureID = created.ID
 	}
 
+	// Pure pay-per-use rate card: no included units / discounts. Trial credit is
+	// granted once per customer as an entitlement at provision time, not baked
+	// into the plan (a plan-level discount recurs every billing period).
 	rateCard := components.BillingRateCard{
 		Key:            input.FeatureKey,
 		Name:           "Billable usage",
@@ -204,11 +202,6 @@ func (k *KonnectAdmin) EnsurePlan(ctx context.Context, input PlanInput) (*Plan, 
 		Price: components.CreatePriceUnit(components.BillingPriceUnit{
 			Amount: input.UnitAmount,
 		}),
-	}
-	if includedMicros > 0 {
-		rateCard.Discounts = &components.Discounts{
-			Usage: sdkkonnectgo.Pointer(fmt.Sprintf("%d", includedMicros)),
-		}
 	}
 
 	currency := input.Currency

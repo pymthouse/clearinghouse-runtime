@@ -44,7 +44,6 @@ type PlanInput struct {
 	FeatureName      string
 	BillableMetterID string
 	UnitAmount       string
-	IncludedMicros   int
 	Currency         string
 	BillingCadence   string
 }

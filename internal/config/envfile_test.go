@@ -81,7 +81,7 @@ OPENMETER_API_KEY=kpat_test
 		t.Fatalf("LoadEnvFile: %v", err)
 	}
 
-	cfg, err := parseForTest()
+	cfg, err := parseForTest(t)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
