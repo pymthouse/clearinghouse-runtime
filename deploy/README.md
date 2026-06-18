@@ -58,7 +58,8 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (from bootstrap) |
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
-| `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
+| `PRICE_ORACLE_URL` | yes | — | ETH/USD oracle HTTP URL (collector fails startup if unreachable) |
+| `PRICE_ORACLE_REFRESH` | no | `5m` | Background oracle refresh interval |
 | `AUTH0_PUBLIC_CLIENT_ID` | no | — | Auth0 public client id (from bootstrap) |
 
 ## OpenMeter/Konnect bootstrap
@@ -91,6 +92,20 @@ Signer computed_fee (wei)
 
 Markup rules are defined in the bootstrap CLI catalog. Collector
 pipeline config: [`deploy/openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
+
+### ETH/USD price oracle
+
+The collector fetches ETH/USD from `PRICE_ORACLE_URL` at startup and caches it in
+memory. **Startup fails if the oracle is unreachable** (entrypoint preflight +
+Benthos warm). There is no static default. Background refresh runs on
+`PRICE_ORACLE_REFRESH`; refresh errors keep the last cached price.
+
+Supported oracle JSON shapes:
+
+- `{"price": 3456.78}`
+- `{"ethereum":{"usd":3456.78}}` (CoinGecko simple price API — default in `.env.example`)
+- `{"data":{"amount":"3456.78"}}` (Coinbase spot API)
+
 The collector does not yet emit `billable_usd_micros` (phase 2); until then the billable meter
 stays empty while the catalog is ready.
 
