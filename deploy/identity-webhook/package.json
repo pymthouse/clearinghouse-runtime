@@ -1,0 +1,13 @@
+{
+  "name": "@livepeer/clearinghouse-identity-webhook",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API-key identity webhook for go-livepeer remote signer (builder-sdk)",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@pymthouse/builder-sdk": "^0.4.3"
+  }
+}

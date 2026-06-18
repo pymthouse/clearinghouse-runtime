@@ -1,7 +1,10 @@
 # clearinghouse deploy/
 
 Docker Compose stack for the clearinghouse runtime:
-**Kafka/Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
+**identity-webhook → Kafka/Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
+
+The in-compose **identity-webhook** uses builder-sdk's **API-key provider** (not Auth0/OIDC)
+and is wired to **remote-signer** via `REMOTE_SIGNER_WEBHOOK_URL`.
 
 ## Design decisions
 
@@ -29,10 +32,21 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env down
 ```
 
+Verify the identity webhook (simulates go-livepeer calling `/authorize`):
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env exec identity-webhook \
+  curl -sS -X POST http://localhost:8090/authorize \
+    -H "Authorization: Bearer dev-webhook-secret-change-me" \
+    -H "Content-Type: application/json" \
+    -d '{"headers":{"Authorization":["Bearer sk_demo_local_key"]}}'
+# expected: "status":200, "auth_id":"demo-client:demo-user"
+```
+
 Kafka + signer only (no metering):
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build kafka remote-signer
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build kafka identity-webhook remote-signer
 ```
 
 Verify CLI port is not published:
@@ -48,8 +62,12 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `REMOTE_SIGNER_WEBHOOK_URL` | yes | — | Identity webhook URL (`/authorize` endpoint) |
-| `WEBHOOK_SECRET` | yes | — | Shared secret passed as `Authorization: Bearer` to the webhook (from bootstrap) |
+| `WEBHOOK_SECRET` | yes | — | Shared secret for signer → webhook (`Authorization: Bearer`) |
+| `REMOTE_SIGNER_WEBHOOK_URL` | no | `http://identity-webhook:8090/authorize` | Signer identity webhook URL |
+| `IDENTITY_ISSUER` | no | `http://identity-webhook:8090` | Issuer stamped on API-key identities |
+| `DEMO_API_KEY` | no | `sk_demo_local_key` | Demo API key accepted by identity-webhook |
+| `DEMO_CLIENT_ID` | no | `demo-client` | `client_id` for the demo key |
+| `DEMO_USER_ID` | no | `demo-user` | `usage_subject` for the demo key |
 | `SIGNER_NETWORK` | no | `arbitrum-one-mainnet` | go-livepeer `-network` |
 | `ETH_RPC_URL` | no | public arb1 endpoint | Arbitrum RPC |
 | `SIGNER_ETH_ADDR` | no | — | Funded signer Ethereum address |
@@ -94,13 +112,14 @@ pipeline config: [`deploy/openmeter-collector/collector.yaml`](openmeter-collect
 The collector does not yet emit `billable_usd_micros` (phase 2); until then the billable meter
 stays empty while the catalog is ready.
 
-### Auth0 identity contract
+### API-key identity contract
 
-- Webhook returns `auth_id = "{azp}:{sub}"` (`CLAIM_CLIENT_ID=azp`, `USAGE_SUBJECT_TYPE=auth0_user_id`)
+- End-user presents `Authorization: Bearer sk_…` to the remote signer
+- Webhook resolves the key → `auth_id = "{client_id}:{usage_subject}"`
 - Collector splits on first colon → `client_id` / `external_user_id`
-- Konnect customer key: `{AUTH0_PUBLIC_CLIENT_ID}:{auth0|sub}`
+- Demo key defaults: `sk_demo_local_key` → `demo-client:demo-user`
 
-Example customer key: `abc123xyz:auth0|user456`
+Example customer key: `demo-client:demo-user`
 
 Per-customer provisioning (Konnect customer + subscription) is a follow-up — not
 yet implemented in the Go CLI.
