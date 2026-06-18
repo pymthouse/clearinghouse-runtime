@@ -62,7 +62,7 @@ services:
     ports:
       - "${SIGNER_HOST_PORT:-8081}:8081"
     volumes:
-      - signer_data:/data
+      - ${SIGNER_DATA_DIR:-./data}:/data
     environment:
       SIGNER_NETWORK: ${SIGNER_NETWORK:-arbitrum-one-mainnet}
       SIGNER_PORT: "8081"
@@ -92,5 +92,5 @@ services:
       OPENMETER_API_KEY: ${OPENMETER_API_KEY}
       ETH_USD_PRICE: ${ETH_USD_PRICE:-3500}
 
-volumes:
-  signer_data:
+# Signer datadir is bind-mounted from deploy/data (see SIGNER_DATA_DIR).
+# Copy keystore + .eth-password from pymthouse/data before first run.

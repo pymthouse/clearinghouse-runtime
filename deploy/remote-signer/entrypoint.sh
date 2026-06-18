@@ -35,7 +35,9 @@ if [ -n "${SIGNER_ETH_ADDR:-}" ]; then
 fi
 
 ARGS="$ARGS -remoteSignerWebhookUrl=${REMOTE_SIGNER_WEBHOOK_URL}"
-ARGS="$ARGS -remoteSignerWebhookHeaders=Authorization:Bearer ${WEBHOOK_SECRET}"
+# X-Api-Key has no spaces — Authorization:Bearer ${WEBHOOK_SECRET} breaks when
+# /usr/local/bin/livepeer $ARGS word-splits the secret into a stray argv token.
+ARGS="$ARGS -remoteSignerWebhookHeaders=X-Api-Key:${WEBHOOK_SECRET}"
 
 ARGS="$ARGS -monitor"
 ARGS="$ARGS -kafkaBootstrapServers=${KAFKA_BROKERS}"
