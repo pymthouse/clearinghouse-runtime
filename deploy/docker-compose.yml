@@ -1,0 +1,72 @@
+# Clearinghouse deploy stack: Kafka + go-livepeer remote signer + OpenMeter collector.
+#
+# No Apache DMZ — the signer container runs go-livepeer directly. Only its signing
+# HTTP port (8081) is published to the host. The CLI/admin port (-cliAddr) is bound
+# to loopback inside the container and is never exposed or published.
+#
+# Full stack:
+#   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+#
+# Kafka + signer only (no metering):
+#   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build kafka remote-signer
+
+services:
+  kafka:
+    build:
+      context: ..
+      dockerfile: deploy/kafka/Dockerfile
+    restart: unless-stopped
+    environment:
+      KAFKA_ADVERTISED_ADDR: kafka:9092
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  remote-signer:
+    build:
+      context: ..
+      dockerfile: deploy/remote-signer/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${SIGNER_HOST_PORT:-8081}:8081"
+    volumes:
+      - signer_data:/data
+    environment:
+      SIGNER_NETWORK: ${SIGNER_NETWORK:-arbitrum-one-mainnet}
+      SIGNER_PORT: "8081"
+      ETH_RPC_URL: ${ETH_RPC_URL:-https://arb1.arbitrum.io/rpc}
+      SIGNER_ETH_ADDR: ${SIGNER_ETH_ADDR:-}
+      SIGNER_REMOTE_DISCOVERY: ${SIGNER_REMOTE_DISCOVERY:-0}
+      ORCH_WEBHOOK_URL: ${ORCH_WEBHOOK_URL:-}
+      LIVE_AI_CAP_REPORT_INTERVAL: ${LIVE_AI_CAP_REPORT_INTERVAL:-}
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_GATEWAY_TOPIC: ${KAFKA_GATEWAY_TOPIC:-livepeer-gateway-events}
+      REMOTE_SIGNER_WEBHOOK_URL: ${REMOTE_SIGNER_WEBHOOK_URL}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+
+  openmeter-collector:
+    build:
+      context: ..
+      dockerfile: deploy/openmeter-collector/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_GATEWAY_TOPIC: ${KAFKA_GATEWAY_TOPIC:-livepeer-gateway-events}
+      OPENMETER_URL: ${OPENMETER_URL}
+      OPENMETER_INGEST_URL: ${OPENMETER_INGEST_URL}
+      OPENMETER_API_KEY: ${OPENMETER_API_KEY}
+      ETH_USD_PRICE: ${ETH_USD_PRICE:-3500}
+
+volumes:
+  signer_data:
