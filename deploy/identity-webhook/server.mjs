@@ -4,6 +4,7 @@ import {
   routeRemoteSignerWebhookRequest,
 } from "@pymthouse/builder-sdk/signer/webhook";
 import { loadApiKeyStore } from "./keys.mjs";
+import { createBalanceGateHook } from "./balance-gate.mjs";
 
 const port = Number(process.env.PORT || 8090);
 
@@ -35,6 +36,11 @@ const config = {
         usageSubjectType: entry.usageSubjectType,
       };
     },
+  }),
+  afterVerify: createBalanceGateHook({
+    gatewayUrl: process.env.BILLING_GATEWAY_URL?.trim() || "http://billing-gateway:8092",
+    gatewaySecret: process.env.BILLING_GATEWAY_SECRET?.trim() || required("WEBHOOK_SECRET"),
+    enabled: process.env.BALANCE_CHECK_ENABLED !== "0",
   }),
 };
 

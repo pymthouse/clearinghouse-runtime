@@ -7,7 +7,7 @@ WORKDIR /app
 COPY deploy/identity-webhook/package.json ./
 RUN npm install --omit=dev
 
-COPY deploy/identity-webhook/keys.mjs deploy/identity-webhook/server.mjs ./
+COPY deploy/identity-webhook/*.mjs ./
 
 ENV PORT=8090
 

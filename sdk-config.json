@@ -1,0 +1,21 @@
+{
+  "auth0": {
+    "domain": "pymthouse.us.auth0.com",
+    "issuer": "https://pymthouse.us.auth0.com/",
+    "jwksUrl": "https://pymthouse.us.auth0.com/.well-known/jwks.json",
+    "clientId": "P1UmVXoFvAqxPndj48bx8vCzeVF1G2Sf",
+    "audience": "livepeer-clearinghouse5"
+  },
+  "signer": {
+    "proxyUrl": "https://your-platform.vercel.app/api/signer",
+    "publicUrl": "https://signer.your-domain.com",
+    "audience": "livepeer-clearinghouse5"
+  },
+  "remoteSigner": {
+    "webhookUrl": "https://your-platform.vercel.app/webhooks/remote-signer"
+  },
+  "openmeter": {
+    "url": "https://us.api.konghq.com/v3/openmeter",
+    "trialFeatureKey": "network_spend"
+  }
+}

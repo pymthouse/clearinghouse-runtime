@@ -1,7 +1,7 @@
 # clearinghouse deploy/
 
 Docker Compose stack for the clearinghouse runtime:
-**identity-webhook → Kafka/Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
+**billing-gateway → identity-webhook → Kafka/Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
 
 The in-compose **identity-webhook** uses builder-sdk's **API-key provider** (not Auth0/OIDC)
 and is wired to **remote-signer** via `REMOTE_SIGNER_WEBHOOK_URL`.
@@ -43,9 +43,10 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env exec identity
 # expected: "status":200, "auth_id":"demo-client:demo-user"
 ```
 
-Kafka + signer only (no metering):
+Kafka + signer only (no metering or billing):
 
 ```bash
+# Set BALANCE_CHECK_ENABLED=0 in deploy/.env first.
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build kafka identity-webhook remote-signer
 ```
 
@@ -76,6 +77,11 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (from bootstrap) |
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
+| `OPENMETER_DEFAULT_PLAN_KEY` | no | `clearinghouse_default_ppu` | Plan subscribed on customer upsert |
+| `BILLING_GATEWAY_URL` | no | `http://billing-gateway:8092` | Internal billing-gateway base URL |
+| `BILLING_GATEWAY_SECRET` | no | `WEBHOOK_SECRET` | Service secret for identity-webhook → billing-gateway |
+| `BALANCE_CHECK_ENABLED` | no | `1` | Set `0` to skip balance gate (kafka-only dev) |
+| `OPENMETER_BALANCE_FEATURE_KEY` | no | `billable_spend` | Entitlement feature checked on authorize |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
 | `AUTH0_PUBLIC_CLIENT_ID` | no | — | Auth0 public client id (from bootstrap) |
 
@@ -109,8 +115,32 @@ Signer computed_fee (wei)
 
 Markup rules are defined in the bootstrap CLI catalog. Collector
 pipeline config: [`deploy/openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
-The collector does not yet emit `billable_usd_micros` (phase 2); until then the billable meter
-stays empty while the catalog is ready.
+
+### Balance gate (authorize-time)
+
+The **billing-gateway** service (`deploy/billing/gateway`) holds Konnect admin credentials.
+The identity webhook does **not** — it calls the gateway over the compose network.
+
+For each `/authorize` request (when `BALANCE_CHECK_ENABLED=1`):
+
+1. API key resolves to `client_id` + `usage_subject`.
+2. `POST billing-gateway/ensure` idempotently creates customer + subscription.
+3. `GET billing-gateway/balance` reads Konnect `entitlement-access` for `OPENMETER_BALANCE_FEATURE_KEY`.
+4. Signing is denied (`status: 403`, reason `insufficient balance`) when `hasAccess=false`.
+
+Set `BALANCE_CHECK_ENABLED=0` for kafka + signer stacks without Konnect.
+
+### Customer upsert (collector self-heal)
+
+The collector runs a local Go provision sidecar (`deploy/billing/cmd/provision-server`) that shares
+logic with billing-gateway via [`deploy/billing/provision`](billing/provision).
+
+For each `create_signed_ticket` event:
+
+1. Benthos maps the CloudEvent (including `billable_usd_micros`, initially equal to `network_fee_usd_micros`).
+2. `POST http://127.0.0.1:8091/ensure` idempotently creates customer + subscription.
+3. Event is ingested to Konnect.
+4. On ingest failure, the collector ensures again and retries once.
 
 ### API-key identity contract
 
@@ -121,5 +151,5 @@ stays empty while the catalog is ready.
 
 Example customer key: `demo-client:demo-user`
 
-Per-customer provisioning (Konnect customer + subscription) is a follow-up — not
-yet implemented in the Go CLI.
+Customer upsert runs in billing-gateway (authorize-time) and the collector provision sidecar
+(ingest-time). The Go bootstrap CLI still provisions meters/features/plans.

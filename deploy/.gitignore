@@ -1,0 +1,5 @@
+# Local signer datadir — copy from pymthouse/data; contains keystore + secrets
+data/
+
+# Runtime env (secrets)
+.env
