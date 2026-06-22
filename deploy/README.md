@@ -77,7 +77,6 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
-| `AUTH0_PUBLIC_CLIENT_ID` | no | — | Auth0 public client id (from bootstrap) |
 
 ## OpenMeter/Konnect bootstrap
 
