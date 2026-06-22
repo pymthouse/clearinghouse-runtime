@@ -49,7 +49,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `REMOTE_SIGNER_WEBHOOK_URL` | yes | — | Identity webhook URL (`/authorize` endpoint) |
-| `WEBHOOK_SECRET` | yes | — | Shared secret passed as `Authorization: Bearer` to the webhook (from bootstrap) |
+| `WEBHOOK_SECRET` | yes | — | Shared secret passed as `Authorization:Bearer <secret>` to the webhook (from bootstrap) |
 | `SIGNER_NETWORK` | no | `arbitrum-one-mainnet` | go-livepeer `-network` |
 | `ETH_RPC_URL` | no | public arb1 endpoint | Arbitrum RPC |
 | `SIGNER_ETH_ADDR` | no | — | Funded signer Ethereum address |

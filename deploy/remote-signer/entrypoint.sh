@@ -20,38 +20,34 @@ if [ ! -f /data/.eth-password ]; then
   echo "" >/data/.eth-password
 fi
 
-ARGS="-remoteSigner"
-ARGS="$ARGS -network=${SIGNER_NETWORK}"
-ARGS="$ARGS -httpAddr=0.0.0.0:${SIGNER_PORT}"
-# CLI/admin port: loopback only — never published, no Apache DMZ in front of this container.
-ARGS="$ARGS -cliAddr=127.0.0.1:4935"
-ARGS="$ARGS -ethUrl=${ETH_RPC_URL}"
-ARGS="$ARGS -ethPassword=/data/.eth-password"
-ARGS="$ARGS -datadir=/data"
-ARGS="$ARGS -v=99"
+set -- \
+  -remoteSigner \
+  "-network=${SIGNER_NETWORK}" \
+  "-httpAddr=0.0.0.0:${SIGNER_PORT}" \
+  "-cliAddr=127.0.0.1:4935" \
+  "-ethUrl=${ETH_RPC_URL}" \
+  "-ethPassword=/data/.eth-password" \
+  "-datadir=/data" \
+  -v=99 \
+  "-remoteSignerWebhookUrl=${REMOTE_SIGNER_WEBHOOK_URL}" \
+  "-remoteSignerWebhookHeaders=Authorization:Bearer ${WEBHOOK_SECRET}" \
+  -monitor \
+  "-kafkaBootstrapServers=${KAFKA_BROKERS}" \
+  "-kafkaGatewayTopic=${KAFKA_GATEWAY_TOPIC}"
 
 if [ -n "${SIGNER_ETH_ADDR:-}" ]; then
-  ARGS="$ARGS -ethAcctAddr=${SIGNER_ETH_ADDR}"
+  set -- "$@" "-ethAcctAddr=${SIGNER_ETH_ADDR}"
 fi
-
-ARGS="$ARGS -remoteSignerWebhookUrl=${REMOTE_SIGNER_WEBHOOK_URL}"
-# X-Api-Key has no spaces — Authorization:Bearer ${WEBHOOK_SECRET} breaks when
-# /usr/local/bin/livepeer $ARGS word-splits the secret into a stray argv token.
-ARGS="$ARGS -remoteSignerWebhookHeaders=X-Api-Key:${WEBHOOK_SECRET}"
-
-ARGS="$ARGS -monitor"
-ARGS="$ARGS -kafkaBootstrapServers=${KAFKA_BROKERS}"
-ARGS="$ARGS -kafkaGatewayTopic=${KAFKA_GATEWAY_TOPIC}"
 
 if [ "${SIGNER_REMOTE_DISCOVERY:-0}" = "1" ] || [ "${SIGNER_REMOTE_DISCOVERY:-0}" = "true" ]; then
-  ARGS="$ARGS -remoteDiscovery=true"
+  set -- "$@" -remoteDiscovery=true
   if [ -n "${ORCH_WEBHOOK_URL:-}" ]; then
-    ARGS="$ARGS -orchWebhookUrl=${ORCH_WEBHOOK_URL}"
+    set -- "$@" "-orchWebhookUrl=${ORCH_WEBHOOK_URL}"
   fi
   if [ -n "${LIVE_AI_CAP_REPORT_INTERVAL:-}" ]; then
-    ARGS="$ARGS -liveAICapReportInterval=${LIVE_AI_CAP_REPORT_INTERVAL}"
+    set -- "$@" "-liveAICapReportInterval=${LIVE_AI_CAP_REPORT_INTERVAL}"
   fi
 fi
 
-echo "entrypoint: starting livepeer $ARGS" >&2
-exec /usr/local/bin/livepeer $ARGS
+echo "entrypoint: starting livepeer remote-signer on 0.0.0.0:${SIGNER_PORT}" >&2
+exec /usr/local/bin/livepeer "$@"
