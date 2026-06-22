@@ -59,7 +59,6 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
-| `AUTH0_PUBLIC_CLIENT_ID` | no | — | Auth0 public client id (from bootstrap) |
 
 ## OpenMeter/Konnect bootstrap
 
@@ -94,13 +93,7 @@ pipeline config: [`deploy/openmeter-collector/collector.yaml`](openmeter-collect
 The collector does not yet emit `billable_usd_micros` (phase 2); until then the billable meter
 stays empty while the catalog is ready.
 
-### Auth0 identity contract
+### Identity contract (collector)
 
-- Webhook returns `auth_id = "{azp}:{sub}"` (`CLAIM_CLIENT_ID=azp`, `USAGE_SUBJECT_TYPE=auth0_user_id`)
-- Collector splits on first colon → `client_id` / `external_user_id`
-- Konnect customer key: `{AUTH0_PUBLIC_CLIENT_ID}:{auth0|sub}`
-
-Example customer key: `abc123xyz:auth0|user456`
-
-Per-customer provisioning (Konnect customer + subscription) is a follow-up — not
-yet implemented in the Go CLI.
+The collector expects Kafka `auth_id` as `client_id:external_user_id` (first-colon split).
+Konnect customer key matches that compound id (e.g. `demo-client:demo-user`).
