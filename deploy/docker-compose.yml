@@ -16,6 +16,8 @@ services:
       context: ..
       dockerfile: deploy/identity-webhook/Dockerfile
     restart: unless-stopped
+    ports:
+      - "${IDENTITY_WEBHOOK_HOST_PORT:-8090}:8090"
     environment:
       PORT: "8090"
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
@@ -26,6 +28,13 @@ services:
       USAGE_SUBJECT_TYPE: ${USAGE_SUBJECT_TYPE:-api_key_user}
       API_KEY_PREFIX: ${API_KEY_PREFIX:-sk_}
       DEMO_API_KEYS: ${DEMO_API_KEYS:-}
+      OPENMETER_URL: ${OPENMETER_URL:-}
+      OPENMETER_API_KEY: ${OPENMETER_API_KEY:-}
+      USAGE_QUERY_ENABLED: ${USAGE_QUERY_ENABLED:-0}
+      OPENMETER_TRIAL_FEATURE_KEY: ${OPENMETER_TRIAL_FEATURE_KEY:-network_spend}
+      JWT_ISSUER: ${JWT_ISSUER:-}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-}
+      ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-0}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
       interval: 10s

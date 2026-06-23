@@ -3,8 +3,8 @@
 Docker Compose stack for the clearinghouse runtime:
 **identity-webhook → Kafka/Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
 
-The in-compose **identity-webhook** uses builder-sdk's **API-key provider** (not Auth0/OIDC)
-and is wired to **remote-signer** via `REMOTE_SIGNER_WEBHOOK_URL`.
+The in-compose **identity-webhook** uses builder-sdk's **API-key provider** (and optional **OIDC** when `JWT_ISSUER` is set)
+and is wired to **remote-signer** via `REMOTE_SIGNER_WEBHOOK_URL`. With `USAGE_QUERY_ENABLED=1`, it also serves self-scoped usage/balance reads from OpenMeter.
 
 ## Design decisions
 
@@ -43,6 +43,18 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env exec identity
 # expected: "status":200, "auth_id":"demo-client:demo-user"
 ```
 
+Self-scoped usage reads (requires `USAGE_QUERY_ENABLED=1` and `OPENMETER_URL` + `OPENMETER_API_KEY`):
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env exec identity-webhook \
+  curl -sS http://localhost:8090/api/v1/apps/demo-client/usage/me/balance \
+    -H "Authorization: Bearer sk_demo_local_key"
+
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env exec identity-webhook \
+  curl -sS "http://localhost:8090/api/v1/apps/demo-client/usage/me?startDate=2026-01-01T00:00:00.000Z&endDate=2026-01-31T23:59:59.999Z" \
+    -H "Authorization: Bearer sk_demo_local_key"
+```
+
 Kafka + signer only (no metering):
 
 ```bash
@@ -68,14 +80,19 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `DEMO_API_KEY` | no | `sk_demo_local_key` | Demo API key accepted by identity-webhook |
 | `DEMO_CLIENT_ID` | no | `demo-client` | `client_id` for the demo key |
 | `DEMO_USER_ID` | no | `demo-user` | `usage_subject` for the demo key |
+| `USAGE_QUERY_ENABLED` | no | `0` | When `1` and OpenMeter creds are set, identity-webhook serves `/api/v1/apps/{clientId}/usage/me` |
+| `OPENMETER_TRIAL_FEATURE_KEY` | no | `network_spend` | Entitlement feature for balance reads |
+| `JWT_ISSUER` | no | — | When set, OIDC JWTs are accepted alongside API keys (`createFirstMatchEndUserVerifier`) |
+| `JWT_AUDIENCE` | no | issuer sans trailing slash | JWT `aud` for OIDC verification |
+| `ALLOW_INSECURE_HTTP` | no | `0` | Set `1` for local OIDC issuers on `http://` |
 | `SIGNER_NETWORK` | no | `arbitrum-one-mainnet` | go-livepeer `-network` |
 | `ETH_RPC_URL` | no | public arb1 endpoint | Arbitrum RPC |
 | `SIGNER_ETH_ADDR` | no | — | Funded signer Ethereum address |
 | `SIGNER_HOST_PORT` | no | `8081` | Host port for the signing HTTP endpoint |
 | `KAFKA_GATEWAY_TOPIC` | no | `livepeer-gateway-events` | Kafka topic |
-| `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (from bootstrap) |
+| `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (collector; identity-webhook usage reads when enabled) |
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
-| `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
+| `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (collector; identity-webhook usage reads when enabled) |
 | `OPENMETER_DEFAULT_PLAN_KEY` | no | `clearinghouse_default_ppu` | Plan subscribed on customer upsert |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
 

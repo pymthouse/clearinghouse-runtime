@@ -4,10 +4,12 @@ RUN apk add --no-cache curl
 
 WORKDIR /app
 
-COPY deploy/identity-webhook/package.json ./
-RUN npm install --omit=dev
+COPY deploy/identity-webhook/package.json deploy/identity-webhook/package-lock.json ./
+RUN npm ci --omit=dev
 
-COPY deploy/identity-webhook/keys.mjs deploy/identity-webhook/server.mjs ./
+COPY deploy/identity-webhook/keys.mjs \
+     deploy/identity-webhook/openmeter-read.mjs \
+     deploy/identity-webhook/server.mjs ./
 
 ENV PORT=8090
 
