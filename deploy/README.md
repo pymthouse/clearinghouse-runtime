@@ -62,7 +62,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `WEBHOOK_SECRET` | yes | — | Shared secret for signer → webhook (`Authorization: Bearer`) |
+| `WEBHOOK_SECRET` | yes | — | Shared secret passed as `Authorization:Bearer <secret>` to the webhook (from bootstrap) |
 | `REMOTE_SIGNER_WEBHOOK_URL` | no | `http://identity-webhook:8090/authorize` | Signer identity webhook URL |
 | `IDENTITY_ISSUER` | no | `http://identity-webhook:8090` | Issuer stamped on API-key identities |
 | `DEMO_API_KEY` | no | `sk_demo_local_key` | Demo API key accepted by identity-webhook |
