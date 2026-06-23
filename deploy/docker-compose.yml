@@ -90,6 +90,7 @@ services:
       OPENMETER_URL: ${OPENMETER_URL}
       OPENMETER_INGEST_URL: ${OPENMETER_INGEST_URL}
       OPENMETER_API_KEY: ${OPENMETER_API_KEY}
+      OPENMETER_DEFAULT_PLAN_KEY: ${OPENMETER_DEFAULT_PLAN_KEY:-clearinghouse_default_ppu}
       ETH_USD_PRICE: ${ETH_USD_PRICE:-3500}
 
 # Signer datadir is bind-mounted from deploy/data (see SIGNER_DATA_DIR).

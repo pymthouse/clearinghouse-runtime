@@ -76,6 +76,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (from bootstrap) |
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
+| `OPENMETER_DEFAULT_PLAN_KEY` | no | `clearinghouse_default_ppu` | Plan subscribed on customer upsert |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
 
 ## OpenMeter/Konnect bootstrap
@@ -108,8 +109,28 @@ Signer computed_fee (wei)
 
 Markup rules are defined in the bootstrap CLI catalog. Collector
 pipeline config: [`deploy/openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
-The collector does not yet emit `billable_usd_micros` (phase 2); until then the billable meter
-stays empty while the catalog is ready.
+
+### Customer upsert (collector self-heal)
+
+The collector runs a local Go provision sidecar (`deploy/openmeter-collector/provision`, Kong `sdk-konnect-go`) that holds the
+OpenMeter admin credentials — the identity webhook does **not** need them.
+
+For each `create_signed_ticket` event:
+
+1. Benthos maps the CloudEvent (including `billable_usd_micros`, initially equal to `network_fee_usd_micros`).
+2. `POST http://127.0.0.1:8091/ensure` idempotently creates customer + subscription (`OPENMETER_DEFAULT_PLAN_KEY`).
+3. Event is ingested to Konnect.
+4. On ingest failure (e.g. `no customer found for event subject`), the collector ensures again and retries once.
+
+### Future admin/query boundary (OAuth later)
+
+When an admin/query API is added, introduce a small internal **billing-gateway** service:
+
+- Move ensure-customer and usage-query logic behind that gateway.
+- Protect caller-to-gateway with OAuth (client credentials / service-to-service).
+- Keep gateway-to-OpenMeter on backend machine credentials (`kpat_…`).
+
+The collector provision sidecar is the thin local equivalent until that gateway exists.
 
 ### API-key identity contract
 
@@ -120,5 +141,5 @@ stays empty while the catalog is ready.
 
 Example customer key: `demo-client:demo-user`
 
-Per-customer provisioning (Konnect customer + subscription) is a follow-up — not
-yet implemented in the Go CLI.
+Customer upsert is handled by the collector provision sidecar (see above). The Go bootstrap CLI
+still provisions meters/features/plans; per-event customer+subscription ensure runs in the collector.
