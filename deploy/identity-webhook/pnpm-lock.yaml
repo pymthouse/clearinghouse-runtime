@@ -1,0 +1,30 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@pymthouse/builder-sdk':
+        specifier: 0.4.6
+        version: 0.4.6
+
+packages:
+
+  '@pymthouse/builder-sdk@0.4.6':
+    resolution: {integrity: sha512-o00iwt4n+5mORHldio/NtDmr05YugFbj7x4Wi73IcybDJRfaHbGjGqde9BbdShljPeP5WgHUhREPopLjpJr7Cg==}
+    engines: {node: '>=20'}
+
+  oauth4webapi@3.8.6:
+    resolution: {integrity: sha512-iwemM91xz8nryHti2yTmg5fhyEMVOkOXwHNqbvcATjyajb5oQxCQzrNOA6uElRHuMhQQTKUyFKV9y/CNyg25BQ==}
+
+snapshots:
+
+  '@pymthouse/builder-sdk@0.4.6':
+    dependencies:
+      oauth4webapi: 3.8.6
+
+  oauth4webapi@3.8.6: {}

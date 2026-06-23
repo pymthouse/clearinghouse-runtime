@@ -1,0 +1,12 @@
+# Local signer datadir (symlink or copy from pymthouse/data)
+deploy/data
+
+# Local env secrets
+deploy/.env
+
+# Node dependencies (local dev; Docker runs npm install in the image)
+node_modules/
+
+# Editor / OS
+.vscode/
+.DS_Store

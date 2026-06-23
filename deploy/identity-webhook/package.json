@@ -8,6 +8,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@pymthouse/builder-sdk": "^0.4.3"
+    "@pymthouse/builder-sdk": "0.4.6"
   }
 }
