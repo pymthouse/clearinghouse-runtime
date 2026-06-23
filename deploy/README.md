@@ -40,7 +40,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env exec identity
     -H "Authorization: Bearer dev-webhook-secret-change-me" \
     -H "Content-Type: application/json" \
     -d '{"headers":{"Authorization":["Bearer sk_demo_local_key"]}}'
-# expected: "status":200, "auth_id":"demo-client:demo-user"
+# expected: "status":200, "auth_id":"demo:demo-client:demo-user"
 ```
 
 Self-scoped usage reads (requires `USAGE_QUERY_ENABLED=1` and `OPENMETER_URL` + `OPENMETER_API_KEY`):
@@ -78,6 +78,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `REMOTE_SIGNER_WEBHOOK_URL` | no | `http://identity-webhook:8090/authorize` | Signer identity webhook URL |
 | `IDENTITY_ISSUER` | no | `http://identity-webhook:8090` | Issuer stamped on API-key identities |
 | `DEMO_API_KEY` | no | `sk_demo_local_key` | Demo API key accepted by identity-webhook |
+| `DEMO_TENANT_ID` | no | `demo` | `tenant_id` for demo key identities |
 | `DEMO_CLIENT_ID` | no | `demo-client` | `client_id` for the demo key |
 | `DEMO_USER_ID` | no | `demo-user` | `usage_subject` for the demo key |
 | `USAGE_QUERY_ENABLED` | no | `0` | When `1` and OpenMeter creds are set, identity-webhook serves `/api/v1/apps/{clientId}/usage/me` |
@@ -92,7 +93,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `KAFKA_GATEWAY_TOPIC` | no | `livepeer-gateway-events` | Kafka topic |
 | `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (collector; identity-webhook usage reads when enabled) |
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
-| `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (collector; identity-webhook usage reads when enabled) |
+| `OPENMETER_API_KEY` | yes | — | Shared fallback key (legacy/default tenant only); runtime prefers per-tenant `.env.<tenant>` SPATs |
 | `OPENMETER_DEFAULT_PLAN_KEY` | no | `clearinghouse_default_ppu` | Plan subscribed on customer upsert |
 | `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
 
@@ -152,11 +153,61 @@ The collector provision sidecar is the thin local equivalent until that gateway 
 ### API-key identity contract
 
 - End-user presents `Authorization: Bearer sk_…` to the remote signer
-- Webhook resolves the key → `auth_id = "{client_id}:{usage_subject}"`
-- Collector splits on first colon → `client_id` / `external_user_id`
-- Demo key defaults: `sk_demo_local_key` → `demo-client:demo-user`
+- Webhook resolves the key → `auth_id = "{tenant_id}:{client_id}:{usage_subject}"`
+- Collector parses three segments (`tenant_id`, `client_id`, `external_user_id`) with legacy two-part fallback when `DEFAULT_TENANT_ID` is set
+- Demo key defaults: `sk_demo_local_key` → `demo:demo-client:demo-user`
 
-Example customer key: `demo-client:demo-user`
+Example customer key: `ch_<hash>`
 
 Customer upsert is handled by the collector provision sidecar (see above). The Go bootstrap CLI
 still provisions meters/features/plans; per-event customer+subscription ensure runs in the collector.
+
+## tenant-admin (per-tenant provisioning)
+
+`deploy/tenant-admin` adds a Go admin service/CLI for per-tenant onboarding:
+
+- Auth0 organization + tenant admin users.
+- Konnect team + per-tenant system account.
+- Per-tenant SPAT token (for collector/plugin ingest).
+- Metering role set assignment on the tenant system account (`Ingest`, `Meter Admin`, `Product Catalog Admin`, `Billing Admin`) using metering wildcard entity scope.
+- Optional sample customer+subscription ensure in OpenMeter.
+
+Run as part of compose:
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build tenant-admin
+```
+
+Health check:
+
+```bash
+curl -sS http://localhost:8093/health
+```
+
+Provision a tenant:
+
+```bash
+curl -sS -X POST http://localhost:8093/admin/tenants \
+  -H "Authorization: Bearer $ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId":"acme",
+    "tenantName":"Acme Inc",
+    "adminEmails":["admin@acme.com"],
+    "adminPassword":"ChangeMe123!",
+    "clientId":"app_acme",
+    "externalUserId":"bootstrap-user",
+    "enableSampleUser":true
+  }'
+```
+
+The response includes a one-time `spat` value and a gitignored tenant env file path under `deploy/tenant-admin/data`.
+
+If billing provider prerequisites are not yet set for a customer, tenant-admin returns `status: "pending_billing_setup"` with an empty `subscriptionId` instead of failing the entire operation.
+
+### Ingest scope note (Konnect SaaS)
+
+Konnect SaaS isolation here is team + machine-token based. It is not Kong Gateway Enterprise Workspace partitioning.
+
+- The collector sidecar resolves tenant SPATs from `deploy/tenant-admin/data/.env.<tenant>` and proxies ingest through `POST /ingest`.
+- Tenant segmentation is enforced by per-tenant SPAT rotation/revocation plus surrogate subject/customer keying and `tenant_id` meter dimensions.

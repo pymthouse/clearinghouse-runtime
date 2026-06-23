@@ -1,7 +1,10 @@
 /**
  * Minimal OpenMeter balance + usage reads for identity-webhook usage/me routes.
- * Customer key format: {clientId}:{externalUserId}
+ * Customer key format: short surrogate derived from {tenantId,clientId,externalUserId}.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { buildCustomerKey } from "./billing-identity.mjs";
 
 const NETWORK_FEE_USD_MICROS_METER = "network_fee_usd_micros";
 const SIGNED_TICKET_COUNT_METER = "signed_ticket_count";
@@ -13,10 +16,6 @@ const METER_GROUP_BY_DETAIL = [
   "pipeline",
   "model_id",
 ];
-
-function buildOpenMeterCustomerKey(clientId, externalUserId) {
-  return `${clientId.trim()}:${externalUserId.trim()}`;
-}
 
 function normalizeBaseUrl(url) {
   let base = url.trim().replace(/\/$/, "");
@@ -105,6 +104,16 @@ function clientIdFromGroup(group, fallbackClientId) {
 function buildKonnectMeterQueryBody(input) {
   const body = {
     group_by_dimensions: [...input.groupBy],
+    filters: {
+      dimensions: {
+        tenant_id: {
+          eq: input.tenantId,
+        },
+        client_id: {
+          eq: input.clientId,
+        },
+      },
+    },
   };
   if (input.startDate) {
     body.from = input.startDate;
@@ -117,12 +126,8 @@ function buildKonnectMeterQueryBody(input) {
     body.granularity = granularity;
   }
   if (input.externalUserId) {
-    body.filters = {
-      dimensions: {
-        subject: {
-          eq: buildOpenMeterCustomerKey(input.clientId, input.externalUserId),
-        },
-      },
+    body.filters.dimensions.subject = {
+      eq: buildCustomerKey(input.tenantId, input.clientId, input.externalUserId),
     };
   }
   return body;
@@ -136,8 +141,8 @@ function getUtcCalendarMonthIsoBounds(now = new Date()) {
   return { startDate: start.toISOString(), endDate: end.toISOString() };
 }
 
-function createOpenMeterClient(env) {
-  const apiKey = env.OPENMETER_API_KEY?.trim();
+function createOpenMeterClient(env, apiKeyOverride) {
+  const apiKey = apiKeyOverride?.trim() || env.OPENMETER_API_KEY?.trim();
   const rawBaseUrl = env.OPENMETER_URL?.trim();
   if (!apiKey || !rawBaseUrl) {
     return null;
@@ -208,7 +213,7 @@ function createOpenMeterClient(env) {
 }
 
 async function getTrialCreditBalance(client, input) {
-  const customerKey = buildOpenMeterCustomerKey(input.clientId, input.externalUserId);
+  const customerKey = buildCustomerKey(input.tenantId, input.clientId, input.externalUserId);
   const featureKey = input.featureKey || client.trialFeatureKey;
   const value = await client.getEntitlementValue(customerKey, featureKey);
 
@@ -243,6 +248,7 @@ function aggregateUserRows(input) {
     const externalUserId = groupByString(group, "external_user_id", "");
     if (!externalUserId) continue;
     if (clientIdFromGroup(group, input.clientId) !== input.clientId) continue;
+    if (groupByString(group, "tenant_id", input.tenantId) !== input.tenantId) continue;
     countByUser.set(
       externalUserId,
       (countByUser.get(externalUserId) ?? 0) + Math.floor(Number(row.value ?? 0)),
@@ -258,6 +264,7 @@ function aggregateUserRows(input) {
       continue;
     }
     if (clientIdFromGroup(group, input.clientId) !== input.clientId) continue;
+    if (groupByString(group, "tenant_id", input.tenantId) !== input.tenantId) continue;
     feeByUser.set(
       externalUserId,
       (feeByUser.get(externalUserId) ?? 0n) + BigInt(Math.floor(Number(row.value ?? 0))),
@@ -289,6 +296,7 @@ function aggregatePipelineModelRows(input) {
   for (const row of input.countRows) {
     const group = row.groupBy || {};
     if (clientIdFromGroup(group, input.clientId) !== input.clientId) continue;
+    if (groupByString(group, "tenant_id", input.tenantId) !== input.tenantId) continue;
     const pipeline = groupByString(group, "pipeline", "unknown");
     const modelId = groupByString(group, "model_id", "unknown");
     const key = `${pipeline}|${modelId}`;
@@ -303,6 +311,7 @@ function aggregatePipelineModelRows(input) {
   for (const row of input.feeRows) {
     const group = row.groupBy || {};
     if (clientIdFromGroup(group, input.clientId) !== input.clientId) continue;
+    if (groupByString(group, "tenant_id", input.tenantId) !== input.tenantId) continue;
     const pipeline = groupByString(group, "pipeline", "unknown");
     const modelId = groupByString(group, "model_id", "unknown");
     const key = `${pipeline}|${modelId}`;
@@ -332,6 +341,7 @@ function aggregatePipelineModelRows(input) {
 
 async function queryOpenMeterUsage(client, input) {
   const periodQuery = {
+    tenantId: input.tenantId,
     clientId: input.clientId,
     startDate: input.startDate,
     endDate: input.endDate,
@@ -346,6 +356,7 @@ async function queryOpenMeterUsage(client, input) {
   ]);
 
   return aggregateUserRows({
+    tenantId: input.tenantId,
     clientId: input.clientId,
     feeRows,
     countRows,
@@ -355,6 +366,7 @@ async function queryOpenMeterUsage(client, input) {
 
 async function queryOpenMeterUserPipelineByModel(client, input) {
   const periodQuery = {
+    tenantId: input.tenantId,
     clientId: input.clientId,
     startDate: input.startDate,
     endDate: input.endDate,
@@ -369,6 +381,7 @@ async function queryOpenMeterUserPipelineByModel(client, input) {
   ]);
 
   return aggregatePipelineModelRows({
+    tenantId: input.tenantId,
     clientId: input.clientId,
     feeRows,
     countRows,
@@ -379,42 +392,97 @@ export function isUsageQueryEnabled(env) {
   return (
     env.USAGE_QUERY_ENABLED?.trim() === "1" &&
     Boolean(env.OPENMETER_URL?.trim()) &&
-    Boolean(env.OPENMETER_API_KEY?.trim())
+    (Boolean(env.OPENMETER_API_KEY?.trim()) || Boolean(env.TENANT_ADMIN_DATA_DIR?.trim()))
   );
 }
 
-export function createOpenMeterUsageReaders(env) {
+function tenantIdForClient(clientId, keyStore, env) {
+  const normalizedClientId = String(clientId || "").trim();
+  if (!normalizedClientId) {
+    return "";
+  }
+  if (keyStore && typeof keyStore.values === "function") {
+    for (const entry of keyStore.values()) {
+      if (String(entry?.clientId || "").trim() === normalizedClientId) {
+        return String(entry?.tenantId || "").trim();
+      }
+    }
+  }
+  return String(env.DEFAULT_TENANT_ID || "").trim();
+}
+
+function loadTenantToken(env, tenantId) {
+  const dataDir = String(env.TENANT_ADMIN_DATA_DIR || "").trim();
+  if (!dataDir || !tenantId) {
+    return String(env.OPENMETER_API_KEY || "").trim();
+  }
+  try {
+    const envPath = path.join(dataDir, `.env.${tenantId}`);
+    const raw = readFileSync(envPath, "utf8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("OPENMETER_API_KEY=")) {
+        return trimmed.slice("OPENMETER_API_KEY=".length).trim();
+      }
+    }
+  } catch {
+    // Fall back to shared API key for legacy/dev environments.
+  }
+  return String(env.OPENMETER_API_KEY || "").trim();
+}
+
+export function createOpenMeterUsageReaders(env, keyStore) {
   if (!isUsageQueryEnabled(env)) {
     return null;
   }
 
-  const client = createOpenMeterClient(env);
-  if (!client) {
-    return null;
+  const clients = new Map();
+  function clientForTenant(tenantId) {
+    const normalizedTenantId = String(tenantId || "").trim() || "__default__";
+    if (clients.has(normalizedTenantId)) {
+      return clients.get(normalizedTenantId);
+    }
+    const token = loadTenantToken(env, normalizedTenantId === "__default__" ? "" : normalizedTenantId);
+    const client = createOpenMeterClient(env, token);
+    clients.set(normalizedTenantId, client);
+    return client;
   }
 
   return {
     readBalance: async ({ clientId, externalUserId }) => {
-      const balance = await getTrialCreditBalance(client, { clientId, externalUserId });
+      const tenantId = tenantIdForClient(clientId, keyStore, env);
+      const client = clientForTenant(tenantId);
+      if (!client) {
+        throw new Error("OpenMeter client unavailable for tenant");
+      }
+      const balance = await getTrialCreditBalance(client, { tenantId, clientId, externalUserId });
       return {
+        tenantId,
         externalUserId,
         ...balance,
         remainingUsdMicros: balance.balanceUsdMicros,
       };
     },
     readUsage: async ({ clientId, externalUserId, startDate, endDate }) => {
+      const tenantId = tenantIdForClient(clientId, keyStore, env);
+      const client = clientForTenant(tenantId);
+      if (!client) {
+        throw new Error("OpenMeter client unavailable for tenant");
+      }
       const defaults = getUtcCalendarMonthIsoBounds();
       const periodStart = startDate || defaults.startDate;
       const periodEnd = endDate || defaults.endDate;
 
       const [usageRows, pipelineRows] = await Promise.all([
         queryOpenMeterUsage(client, {
+          tenantId,
           clientId,
           externalUserId,
           startDate: periodStart,
           endDate: periodEnd,
         }),
         queryOpenMeterUserPipelineByModel(client, {
+          tenantId,
           clientId,
           externalUserId,
           startDate: periodStart,
@@ -429,6 +497,7 @@ export function createOpenMeterUsageReaders(env) {
       };
 
       return {
+        tenantId,
         clientId,
         period: { start: periodStart, end: periodEnd },
         currentUser: {

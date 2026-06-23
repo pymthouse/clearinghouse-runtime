@@ -3,6 +3,8 @@ deploy/data
 
 # Local env secrets
 deploy/.env
+deploy/tenant-admin/data/
+deploy/tenant-admin/.env.*
 
 # Node dependencies (local dev; Docker runs npm install in the image)
 node_modules/
@@ -10,3 +12,7 @@ node_modules/
 # Editor / OS
 .vscode/
 .DS_Store
+
+# Brag skill (local install + generated output, not committed)
+.agents/skills/brag/
+brag-output/

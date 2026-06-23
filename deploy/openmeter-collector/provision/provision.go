@@ -16,6 +16,7 @@ type Provisioner struct {
 }
 
 type ProvisionInput struct {
+	TenantID       string
 	ClientID       string
 	ExternalUserID string
 	DisplayName    string
@@ -31,10 +32,6 @@ type ProvisionResult struct {
 		Customer     bool `json:"customer"`
 		Subscription bool `json:"subscription"`
 	} `json:"created"`
-}
-
-func buildCustomerKey(clientID, externalUserID string) string {
-	return strings.TrimSpace(clientID) + ":" + strings.TrimSpace(externalUserID)
 }
 
 func normalizeOpenMeterURL(baseURL string) string {
@@ -65,22 +62,26 @@ func NewProvisioner(baseURL, apiKey, planKey string) *Provisioner {
 }
 
 func (p *Provisioner) Ensure(ctx context.Context, input ProvisionInput) (*ProvisionResult, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
 	clientID := strings.TrimSpace(input.ClientID)
 	externalUserID := strings.TrimSpace(input.ExternalUserID)
-	if clientID == "" || externalUserID == "" {
-		return nil, fmt.Errorf("clientId and externalUserId must be non-empty")
+	if tenantID == "" || clientID == "" || externalUserID == "" {
+		return nil, fmt.Errorf("tenantId, clientId and externalUserId must be non-empty")
 	}
 	if p.planKey == "" {
 		return nil, fmt.Errorf("plan key must be non-empty")
 	}
 
-	customerKey := buildCustomerKey(clientID, externalUserID)
+	customerKey, err := buildCustomerKey(tenantID, clientID, externalUserID)
+	if err != nil {
+		return nil, err
+	}
 	displayName := strings.TrimSpace(input.DisplayName)
 	if displayName == "" {
-		displayName = customerKey
+		displayName = tenantID + "/" + clientID + "/" + externalUserID
 	}
 
-	customerID, customerCreated, err := p.ensureCustomer(ctx, customerKey, displayName)
+	customerID, customerCreated, err := p.ensureCustomer(ctx, tenantID, clientID, externalUserID, customerKey, displayName)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +103,7 @@ func (p *Provisioner) Ensure(ctx context.Context, input ProvisionInput) (*Provis
 	return result, nil
 }
 
-func (p *Provisioner) ensureCustomer(ctx context.Context, customerKey, displayName string) (string, bool, error) {
+func (p *Provisioner) ensureCustomer(ctx context.Context, tenantID, clientID, externalUserID, customerKey, displayName string) (string, bool, error) {
 	if existing, err := p.findCustomerByKey(ctx, customerKey); err != nil {
 		return "", false, err
 	} else if existing != "" {
@@ -112,6 +113,11 @@ func (p *Provisioner) ensureCustomer(ctx context.Context, customerKey, displayNa
 	res, err := p.sdk.OpenMeterCustomers.CreateCustomer(ctx, components.CreateCustomerRequest{
 		Key:  customerKey,
 		Name: displayName,
+		Labels: map[string]string{
+			"tenant_id":        strings.TrimSpace(tenantID),
+			"client_id":        strings.TrimSpace(clientID),
+			"external_user_id": strings.TrimSpace(externalUserID),
+		},
 		UsageAttribution: &components.UsageAttribution{
 			SubjectKeys: []string{customerKey},
 		},
@@ -295,6 +301,10 @@ func (p *Provisioner) ensureSubscription(ctx context.Context, customerID string)
 		Plan: planRef,
 	})
 	if err != nil {
+		normalizedErr := strings.ToLower(err.Error())
+		if strings.Contains(normalizedErr, "invalid billing setup") {
+			return "", "pending_billing_setup", false, nil
+		}
 		return "", "", false, fmt.Errorf("creating subscription for customer %s plan %s: %w", customerID, p.planKey, err)
 	}
 	if createRes.BillingSubscription == nil || createRes.BillingSubscription.ID == "" {

@@ -32,9 +32,14 @@ services:
       OPENMETER_API_KEY: ${OPENMETER_API_KEY:-}
       USAGE_QUERY_ENABLED: ${USAGE_QUERY_ENABLED:-0}
       OPENMETER_TRIAL_FEATURE_KEY: ${OPENMETER_TRIAL_FEATURE_KEY:-network_spend}
+      TENANT_ADMIN_DATA_DIR: ${TENANT_ADMIN_DATA_DIR:-/tenant-admin-data}
+      TENANT_REGISTRY_PATH: ${TENANT_REGISTRY_PATH:-/tenant-admin-data/apps.json}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-}
       JWT_ISSUER: ${JWT_ISSUER:-}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-}
       ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-0}
+    volumes:
+      - ./tenant-admin/data:/tenant-admin-data:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
       interval: 10s
@@ -101,6 +106,34 @@ services:
       OPENMETER_API_KEY: ${OPENMETER_API_KEY}
       OPENMETER_DEFAULT_PLAN_KEY: ${OPENMETER_DEFAULT_PLAN_KEY:-clearinghouse_default_ppu}
       ETH_USD_PRICE: ${ETH_USD_PRICE:-3500}
+      TENANT_ADMIN_DATA_DIR: ${TENANT_ADMIN_DATA_DIR:-/tenant-admin-data}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-}
+    volumes:
+      - ./tenant-admin/data:/tenant-admin-data:ro
+
+  tenant-admin:
+    build:
+      context: ..
+      dockerfile: deploy/tenant-admin/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${TENANT_ADMIN_HOST_PORT:-8093}:8093"
+    environment:
+      ADMIN_SECRET: ${ADMIN_SECRET}
+      TENANT_ADMIN_LISTEN_ADDR: ${TENANT_ADMIN_LISTEN_ADDR:-:8093}
+      TENANT_ADMIN_DATA_DIR: ${TENANT_ADMIN_DATA_DIR:-/app/data}
+      KONNECT_API_URL: ${KONNECT_API_URL:-https://global.api.konghq.com}
+      KONNECT_PLATFORM_PAT: ${KONNECT_PLATFORM_PAT}
+      KONNECT_INGEST_ROLE: ${KONNECT_INGEST_ROLE:-Ingest}
+      KONNECT_SPAT_TTL_DAYS: ${KONNECT_SPAT_TTL_DAYS:-365}
+      OPENMETER_URL: ${OPENMETER_URL}
+      OPENMETER_DEFAULT_PLAN_KEY: ${OPENMETER_DEFAULT_PLAN_KEY:-clearinghouse_default_ppu}
+      AUTH0_MGMT_DOMAIN: ${AUTH0_MGMT_DOMAIN}
+      AUTH0_MGMT_CLIENT_ID: ${AUTH0_MGMT_CLIENT_ID}
+      AUTH0_MGMT_CLIENT_SECRET: ${AUTH0_MGMT_CLIENT_SECRET}
+      AUTH0_DEFAULT_CONNECTION: ${AUTH0_DEFAULT_CONNECTION:-Username-Password-Authentication}
+    volumes:
+      - ./tenant-admin/data:/app/data
 
 # Signer datadir is bind-mounted from deploy/data (see SIGNER_DATA_DIR).
 # Copy keystore + .eth-password from pymthouse/data before first run.

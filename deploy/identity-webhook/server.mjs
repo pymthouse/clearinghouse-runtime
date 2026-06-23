@@ -5,6 +5,7 @@ import {
   createOidcEndUserVerifier,
   routeIdentityServiceRequest,
 } from "@pymthouse/builder-sdk/signer/webhook";
+import { buildAuthId } from "./billing-identity.mjs";
 import { loadApiKeyStore } from "./keys.mjs";
 import { createOpenMeterUsageReaders, isUsageQueryEnabled } from "./openmeter-read.mjs";
 
@@ -36,6 +37,7 @@ const apiKeyVerifier = createApiKeyEndUserVerifier({
     }
     return {
       userId: entry.userId,
+      tenantId: entry.tenantId,
       clientId: entry.clientId,
       usageSubjectType: entry.usageSubjectType,
     };
@@ -67,7 +69,7 @@ function createEndUserAuth() {
 }
 
 const endUserAuth = createEndUserAuth();
-const openMeterReaders = createOpenMeterUsageReaders(process.env);
+const openMeterReaders = createOpenMeterUsageReaders(process.env, keyStore);
 
 const config = {
   webhookSecret: required("WEBHOOK_SECRET"),
@@ -122,8 +124,49 @@ async function handleRequest(req, res) {
     return;
   }
 
+  const responseText = await response.text();
+  let outgoingBody = responseText;
+  if (req.method === "POST" && req.url === "/authorize" && response.status === 200) {
+    try {
+      const payload = JSON.parse(responseText);
+      if (payload?.status === 200 && payload?.identity) {
+        const apiKey = extractEndUserApiKey(body);
+        const entry = apiKey ? keyStore.get(apiKey) : undefined;
+        const tenantId = entry?.tenantId?.trim();
+        if (tenantId) {
+          payload.auth_id = buildAuthId(
+            tenantId,
+            payload.identity.client_id,
+            payload.identity.usage_subject,
+          );
+          outgoingBody = JSON.stringify(payload);
+        }
+      }
+    } catch {
+      // Keep original authorize response on parse errors.
+    }
+  }
+
   res.writeHead(response.status, Object.fromEntries(response.headers));
-  res.end(await response.text());
+  res.end(outgoingBody);
+}
+
+function extractEndUserApiKey(rawBody) {
+  if (!rawBody?.length) {
+    return "";
+  }
+  try {
+    const payload = JSON.parse(rawBody.toString("utf8"));
+    const headerValues = payload?.headers?.Authorization ?? payload?.headers?.authorization;
+    const authorization = Array.isArray(headerValues) ? headerValues[0] : headerValues;
+    if (typeof authorization !== "string") {
+      return "";
+    }
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    return match?.[1]?.trim() ?? "";
+  } catch {
+    return "";
+  }
 }
 
 createServer((req, res) => {

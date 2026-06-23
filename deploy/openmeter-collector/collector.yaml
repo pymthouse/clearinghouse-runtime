@@ -2,8 +2,8 @@
 #
 # Notes:
 # - Topic carries multiple event types; filter to create_signed_ticket only.
-# - auth_id is expected as "client_id:external_user_id" from the signer webhook response.
-# - Uses first-colon split semantics to preserve compatibility with builder-sdk.
+# - auth_id is expected as "tenant_id:client_id:external_user_id" from the signer webhook response.
+# - Uses 3-part split with fallback to legacy "client_id:external_user_id" when DEFAULT_TENANT_ID is set.
 # - Konnect ingest: POST {OPENMETER_INGEST_URL} (set to ${OPENMETER_URL}/events).
 #   For self-hosted OpenMeter set OPENMETER_INGEST_URL to ${OPENMETER_URL}/api/v1/events.
 # - Customer upsert: local Go provision sidecar on :8091/ensure (Kong sdk-konnect-go).
@@ -27,10 +27,15 @@ pipeline:
         let auth_id = $data.auth_id.or("").string().trim()
         root = if $auth_id == "" { deleted() }
 
-        let colon = $auth_id.index_of(":")
-        let is_compound = $colon > 0 && $colon < $auth_id.length() - 1
-        let client_id = if $is_compound { $auth_id.slice(0, $colon) } else { $auth_id }
-        let external_user_id = if $is_compound { $auth_id.slice($colon + 1) } else { $auth_id }
+        let first_colon = $auth_id.index_of(":")
+        let has_first = $first_colon > 0 && $first_colon < $auth_id.length() - 1
+        let remainder = if $has_first { $auth_id.slice($first_colon + 1) } else { "" }
+        let second_colon_offset = $remainder.index_of(":")
+        let has_second = $second_colon_offset > 0 && $second_colon_offset < $remainder.length() - 1
+        let tenant_id = if $has_second { $auth_id.slice(0, $first_colon) } else { env("DEFAULT_TENANT_ID").or("") }
+        let client_id = if $has_second { $remainder.slice(0, $second_colon_offset) } else if $has_first { $auth_id.slice(0, $first_colon) } else { $auth_id }
+        let external_user_id = if $has_second { $remainder.slice($second_colon_offset + 1) } else if $has_first { $auth_id.slice($first_colon + 1) } else { "" }
+        root = if $tenant_id == "" || $client_id == "" || $external_user_id == "" { deleted() }
 
         let eth_usd = env("ETH_USD_PRICE").number().or(3500)
         let fee_wei = $data.computed_fee.number().or(0)
@@ -44,6 +49,7 @@ pipeline:
           "subject": $auth_id,
           "time": $data.current_time.or(now()),
           "data": {
+            "tenant_id": $tenant_id,
             "client_id": $client_id,
             "external_user_id": $external_user_id,
             "network_fee_usd_micros": $fee_usd_micros,
@@ -66,6 +72,7 @@ pipeline:
     # Proactive idempotent customer ensure before ingest (preserve CloudEvent body).
     - branch:
         request_map: |
+          root.tenant_id = this.data.tenant_id
           root.client_id = this.data.client_id
           root.external_user_id = this.data.external_user_id
           root.auth_id = this.subject
@@ -81,10 +88,9 @@ pipeline:
 output:
   fallback:
     - http_client:
-        url: ${OPENMETER_INGEST_URL}
+        url: http://127.0.0.1:8091/ingest
         verb: POST
         headers:
-          Authorization: "Bearer ${OPENMETER_API_KEY}"
           Content-Type: application/cloudevents+json
         successful_on:
           - 200
@@ -97,6 +103,7 @@ output:
             message: "ingest failed, ensuring customer then retrying: ${! error() }"
         - branch:
             request_map: |
+              root.tenant_id = this.data.tenant_id
               root.client_id = this.data.client_id
               root.external_user_id = this.data.external_user_id
               root.auth_id = this.subject
@@ -109,10 +116,9 @@ output:
                   timeout: 10s
             result_map: ""
       http_client:
-        url: ${OPENMETER_INGEST_URL}
+        url: http://127.0.0.1:8091/ingest
         verb: POST
         headers:
-          Authorization: "Bearer ${OPENMETER_API_KEY}"
           Content-Type: application/cloudevents+json
         successful_on:
           - 200

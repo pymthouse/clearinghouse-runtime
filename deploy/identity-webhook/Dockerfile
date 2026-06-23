@@ -7,7 +7,8 @@ WORKDIR /app
 COPY deploy/identity-webhook/package.json deploy/identity-webhook/package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY deploy/identity-webhook/keys.mjs \
+COPY deploy/identity-webhook/billing-identity.mjs \
+     deploy/identity-webhook/keys.mjs \
      deploy/identity-webhook/openmeter-read.mjs \
      deploy/identity-webhook/server.mjs ./
 
