@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ADVERTISED="${KAFKA_ADVERTISED_ADDR:-kafka:9092}"
+ADVERTISED="${KAFKA_ADVERTISED_ADDR}"
 
 # NOTE: Deployment: See https://github.com/livepeer/clearinghouse/issues/43 for tracking.
 # The --mode dev-container flag below launches Redpanda in "development container" mode:

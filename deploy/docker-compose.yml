@@ -10,6 +10,19 @@
 # Kafka + signer only (no metering):
 #   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build kafka remote-signer
 
+x-kafka-env: &kafka-env
+  KAFKA_BROKERS: ${KAFKA_BROKERS}
+  KAFKA_GATEWAY_TOPIC: ${KAFKA_GATEWAY_TOPIC}
+
+x-signer-env: &signer-env
+  SIGNER_NETWORK: ${SIGNER_NETWORK}
+  ETH_RPC_URL: ${ETH_RPC_URL}
+  SIGNER_PORT: "8081"
+  SIGNER_ETH_ADDR: ${SIGNER_ETH_ADDR:-}
+  SIGNER_REMOTE_DISCOVERY: ${SIGNER_REMOTE_DISCOVERY:-0}
+  ORCH_WEBHOOK_URL: ${ORCH_WEBHOOK_URL:-}
+  LIVE_AI_CAP_REPORT_INTERVAL: ${LIVE_AI_CAP_REPORT_INTERVAL:-}
+
 services:
   kafka:
     build:
@@ -17,7 +30,7 @@ services:
       dockerfile: deploy/kafka/Dockerfile
     restart: unless-stopped
     environment:
-      KAFKA_ADVERTISED_ADDR: kafka:9092
+      KAFKA_ADVERTISED_ADDR: ${KAFKA_ADVERTISED_ADDR}
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
       interval: 10s
@@ -40,15 +53,7 @@ services:
     volumes:
       - ${SIGNER_DATA_DIR:-./data}:/data
     environment:
-      SIGNER_NETWORK: ${SIGNER_NETWORK:-arbitrum-one-mainnet}
-      SIGNER_PORT: "8081"
-      ETH_RPC_URL: ${ETH_RPC_URL:-https://arb1.arbitrum.io/rpc}
-      SIGNER_ETH_ADDR: ${SIGNER_ETH_ADDR:-}
-      SIGNER_REMOTE_DISCOVERY: ${SIGNER_REMOTE_DISCOVERY:-0}
-      ORCH_WEBHOOK_URL: ${ORCH_WEBHOOK_URL:-}
-      LIVE_AI_CAP_REPORT_INTERVAL: ${LIVE_AI_CAP_REPORT_INTERVAL:-}
-      KAFKA_BROKERS: kafka:9092
-      KAFKA_GATEWAY_TOPIC: ${KAFKA_GATEWAY_TOPIC:-livepeer-gateway-events}
+      <<: [*signer-env, *kafka-env]
       REMOTE_SIGNER_WEBHOOK_URL: ${REMOTE_SIGNER_WEBHOOK_URL}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
 
@@ -61,8 +66,7 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      KAFKA_BROKERS: kafka:9092
-      KAFKA_GATEWAY_TOPIC: ${KAFKA_GATEWAY_TOPIC:-livepeer-gateway-events}
+      <<: *kafka-env
       OPENMETER_URL: ${OPENMETER_URL}
       OPENMETER_INGEST_URL: ${OPENMETER_INGEST_URL}
       OPENMETER_API_KEY: ${OPENMETER_API_KEY}

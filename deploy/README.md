@@ -49,6 +49,8 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `ETH_RPC_URL` | no | public arb1 endpoint | Arbitrum RPC |
 | `SIGNER_ETH_ADDR` | no | — | Funded signer Ethereum address |
 | `SIGNER_HOST_PORT` | no | `8081` | Host port for the signing HTTP endpoint |
+| `KAFKA_ADVERTISED_ADDR` | no | `kafka:9092` | Redpanda advertised Kafka address (broker container) |
+| `KAFKA_BROKERS` | no | `kafka:9092` | Kafka bootstrap servers |
 | `KAFKA_GATEWAY_TOPIC` | no | `livepeer-gateway-events` | Kafka topic |
 | `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (from bootstrap) |
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |

@@ -1,11 +1,11 @@
 #!/bin/sh
 set -eu
 
-SIGNER_NETWORK="${SIGNER_NETWORK:-arbitrum-one-mainnet}"
-SIGNER_PORT="${SIGNER_PORT:-8081}"
-ETH_RPC_URL="${ETH_RPC_URL:-https://arb1.arbitrum.io/rpc}"
-KAFKA_BROKERS="${KAFKA_BROKERS:-kafka:9092}"
-KAFKA_GATEWAY_TOPIC="${KAFKA_GATEWAY_TOPIC:-livepeer-gateway-events}"
+SIGNER_NETWORK="${SIGNER_NETWORK}"
+SIGNER_PORT="${SIGNER_PORT}"
+ETH_RPC_URL="${ETH_RPC_URL}"
+KAFKA_BROKERS="${KAFKA_BROKERS}"
+KAFKA_GATEWAY_TOPIC="${KAFKA_GATEWAY_TOPIC}"
 
 if [ -z "${REMOTE_SIGNER_WEBHOOK_URL:-}" ]; then
   echo "entrypoint: REMOTE_SIGNER_WEBHOOK_URL is required (identity webhook URL)" >&2
