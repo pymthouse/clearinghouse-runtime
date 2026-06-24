@@ -4,8 +4,8 @@ RUN apk add --no-cache curl
 
 WORKDIR /app
 
-COPY identity-webhook/package.json ./
-RUN npm install --omit=dev
+COPY identity-webhook/package.json identity-webhook/package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY identity-webhook/keys.mjs identity-webhook/server.mjs ./
 

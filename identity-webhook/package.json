@@ -7,6 +7,9 @@
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "test": "node --test keys.test.mjs"
+  },
   "dependencies": {
     "@pymthouse/builder-sdk": "0.4.6"
   }
