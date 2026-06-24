@@ -69,4 +69,4 @@ services:
       ETH_USD_PRICE: ${ETH_USD_PRICE:-3500}
 
 # Signer datadir is bind-mounted from deploy/data (see SIGNER_DATA_DIR).
-# Copy keystore + .eth-password from pymthouse/data before first run.
+# Copy keystore + .eth-password into deploy/data before first run.

@@ -58,9 +58,9 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 ## OpenMeter/Konnect bootstrap
 
 Provision meters, features, and the default pay-per-use plan before starting the collector.
-Use the Go `clearinghouse-bootstrap` CLI (`feat/go-bootstrap-cli`) or your existing Konnect setup.
+Use the Go `clearinghouse-bootstrap` CLI or your existing Konnect setup.
 
-Creates (additive — existing pymthouse objects are untouched):
+Creates:
 
 | Object | Key | Purpose |
 |--------|-----|---------|
