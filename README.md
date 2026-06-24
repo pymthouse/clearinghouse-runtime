@@ -26,7 +26,7 @@ Signer HTTP request
 
 **Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
 
-**Identity & auth.** The signer container runs `go-livepeer` directly. Every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls your `/authorize` endpoint with `Authorization: Bearer <WEBHOOK_SECRET>` — no reverse proxy or gateway in front of the signer.
+**Identity & auth.** The signer container runs `go-livepeer` directly. In the normal path, every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls your `/authorize` endpoint with `Authorization: Bearer <WEBHOOK_SECRET>` — no reverse proxy or gateway in front of the signer. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host. Only the signing HTTP port (`8081`) is exposed.
 
@@ -36,16 +36,21 @@ Signer HTTP request
 
 ### 1. Quick check — Kafka + signer
 
-Start with the minimum services to confirm the signer and broker are alive. You still need a real identity webhook URL.
+Start here before wiring identity or metering. This runs only the Kafka broker and remote signer so you can confirm the core path is alive.
 
 ```bash
 cp kafka/.env.example kafka/.env
 cp remote-signer/.env.example remote-signer/.env
 $EDITOR remote-signer/.env
+# For a local alive check without an identity webhook:
+#   REMOTE_SIGNER_WEBHOOK_URL=
+#   WEBHOOK_SECRET=
 
 docker compose up -d --build kafka remote-signer
 docker compose logs -f remote-signer
 ```
+
+Expected result: `remote-signer` starts cleanly, connects to Kafka, and serves the signing HTTP port.
 
 Verify CLI port is not published:
 
@@ -58,7 +63,7 @@ docker compose port remote-signer 8081
 
 ### 2. Full stack — add metering
 
-Provision OpenMeter meters/features (see [OpenMeter/Konnect bootstrap](#openmeterkonnect-bootstrap)), then configure the collector:
+After the quick check passes, add the OpenMeter collector and hosted metering configuration. Provision OpenMeter meters/features (see [OpenMeter/Konnect bootstrap](#openmeterkonnect-bootstrap)), then configure the collector:
 
 ```bash
 cp openmeter-collector/.env.example openmeter-collector/.env
