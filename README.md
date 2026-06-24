@@ -7,7 +7,7 @@ Docker Compose stack for the clearinghouse runtime:
 
 | Service | Role | Docs |
 | --- | --- | --- |
-| **identity-webhook** (`identity-webhook`) | Resolves end-user API keys to `auth_id` for go-livepeer's `/authorize` hook. Uses builder-sdk's API-key provider. | [builder-sdk signer webhook](https://github.com/livepeer/builder-sdk) |
+| **identity-webhook** (`identity-webhook`) | Resolves end-user API keys to `auth_id` for go-livepeer's `/authorize` hook. Uses builder-sdk's API-key provider. | [builder-sdk](https://github.com/pymthouse/builder-sdk) |
 | **Redpanda** (`kafka`) | Kafka-compatible event bus. The signer publishes gateway events; the collector consumes them. | [Redpanda docs](https://docs.redpanda.com/) |
 | **go-livepeer remote signer** (`remote-signer`) | Signs Livepeer payment tickets and emits `create_signed_ticket` events to Kafka. | [go-livepeer](https://github.com/livepeer/go-livepeer) |
 | **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. | [OpenMeter collector](https://openmeter.io/docs/collectors) |
@@ -44,7 +44,7 @@ cp kafka/.env.example kafka/.env
 cp identity-webhook/.env.example identity-webhook/.env
 cp remote-signer/.env.example remote-signer/.env
 $EDITOR identity-webhook/.env remote-signer/.env
-# WEBHOOK_SECRET must match in both files.
+# WEBHOOK_SECRET must match in both files (`.env.example` ships a local dev value).
 # For a local alive check without an identity webhook:
 #   REMOTE_SIGNER_WEBHOOK_URL=
 #   WEBHOOK_SECRET=
@@ -53,7 +53,7 @@ docker compose up -d --build kafka identity-webhook remote-signer
 docker compose logs -f remote-signer
 ```
 
-Verify the identity webhook (simulates go-livepeer calling `/authorize`):
+Verify the identity webhook (simulates go-livepeer calling `/authorize`; secret matches `.env.example`):
 
 ```bash
 docker compose exec identity-webhook \

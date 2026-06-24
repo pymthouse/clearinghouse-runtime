@@ -9,7 +9,7 @@
 # Full stack:
 #   docker compose up -d --build
 #
-# Kafka + signer only (no metering):
+# Kafka + identity webhook + signer only (no metering):
 #   docker compose up -d --build kafka identity-webhook remote-signer
 
 services:
