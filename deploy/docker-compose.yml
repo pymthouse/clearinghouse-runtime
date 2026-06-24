@@ -1,8 +1,8 @@
-# Clearinghouse deploy stack: Kafka + go-livepeer remote signer + OpenMeter collector.
+# Clearinghouse deploy stack: Redpanda + go-livepeer remote signer + OpenMeter collector.
 #
-# No Apache DMZ — the signer container runs go-livepeer directly. Only its signing
-# HTTP port (8081) is published to the host. The CLI/admin port (-cliAddr) is bound
-# to loopback inside the container and is never exposed or published.
+# Redpanda is the Kafka-compatible broker; The signer container runs go-livepeer directly — only its signing HTTP port
+# (8081) is published to the host. The CLI/admin port (-cliAddr) is bound to loopback
+# inside the container and is never exposed or published.
 #
 # Full stack:
 #   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build

@@ -5,24 +5,19 @@ Docker Compose stack for the clearinghouse runtime:
 
 ## Design decisions
 
-**No Apache DMZ.** The remote signer container runs `go-livepeer` directly —
-there is no Apache reverse proxy or `mod_authnz_jwt` layer in front of it.
-Identity validation is handled by the `-remoteSignerWebhookUrl` hook (your
-`/authorize` endpoint) and the shared `WEBHOOK_SECRET`.
+**Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda Kafka runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
+
+**Identity & auth.** The signer container runs `go-livepeer` directly. Every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls your `/authorize` endpoint with `Authorization: Bearer <WEBHOOK_SECRET>` — no reverse proxy or gateway in front of the signer.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to
 `127.0.0.1:4935` inside the container and is never published or mapped to the
-host — not in `docker-compose.yml`. Only the signing HTTP port
-(`8081`) is exposed.
+host. Only the signing HTTP port (`8081`) is exposed.
 
 ## Local stack
 
 ```bash
 cp deploy/.env.example deploy/.env
 $EDITOR deploy/.env
-
-# If using clearinghouse-bootstrap (feat/go-bootstrap-cli), merge WEBHOOK_SECRET
-# and Konnect vars from .env.livepeer into deploy/.env.
 
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f
