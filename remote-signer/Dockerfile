@@ -8,7 +8,7 @@ FROM livepeer/go-livepeer:v0.8.11
 
 RUN mkdir -p /data
 
-COPY deploy/remote-signer/entrypoint.sh /entrypoint.sh
+COPY remote-signer/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8081

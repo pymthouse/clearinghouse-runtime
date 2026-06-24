@@ -1,12 +1,19 @@
 #!/bin/sh
 set -eu
 
-ADVERTISED="${KAFKA_ADVERTISED_ADDR}"
+if [ -f /service/.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /service/.env
+  set +a
+fi
+
+ADVERTISED="${KAFKA_ADVERTISED_ADDR:-kafka:9092}"
 
 # NOTE: Deployment: See https://github.com/livepeer/clearinghouse/issues/43 for tracking.
 # The --mode dev-container flag below launches Redpanda in "development container" mode:
 # - No security/encryption (PLAINTEXT)
-# - Not for production! This enables fast local startup, disables most persistence/durability, 
+# - Not for production! This enables fast local startup, disables most persistence/durability,
 #   and relaxes networking for development and Docker Compose stacks.
 # Update this script if production requirements change.
 
