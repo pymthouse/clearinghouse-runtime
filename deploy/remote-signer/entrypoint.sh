@@ -39,6 +39,10 @@ if [ -n "${SIGNER_ETH_ADDR:-}" ]; then
   set -- "$@" "-ethAcctAddr=${SIGNER_ETH_ADDR}"
 fi
 
+if [ -n "${SIGNER_ETH_KEYSTORE_PATH:-}" ]; then
+  set -- "$@" "-ethKeystorePath=${SIGNER_ETH_KEYSTORE_PATH}"
+fi
+
 if [ "${SIGNER_REMOTE_DISCOVERY:-0}" = "1" ] || [ "${SIGNER_REMOTE_DISCOVERY:-0}" = "true" ]; then
   set -- "$@" -remoteDiscovery=true
   if [ -n "${ORCH_WEBHOOK_URL:-}" ]; then
