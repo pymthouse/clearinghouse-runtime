@@ -34,7 +34,7 @@ Signer HTTP request
 
 ### 1. Quick check — Kafka + signer
 
-Start with the minimum services to confirm the signer and broker are alive. You still need a real identity webhook URL.
+Start with the minimum services to confirm the signer and broker are alive. You still need a real identity webhook URL (or the mock profile below).
 
 ```bash
 cp deploy/.env.example deploy/.env
@@ -61,6 +61,41 @@ Provision OpenMeter meters/features (see [OpenMeter/Konnect bootstrap](#openmete
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env down
+```
+
+### 3. Local smoke test (mock profile)
+
+The `mock` Compose profile starts a tiny HTTP server that accepts signer authorize callbacks and collector ingest POSTs. **Opt in only** — it is not started by default.
+
+Set these in `deploy/.env` when using the mock:
+
+```bash
+REMOTE_SIGNER_WEBHOOK_URL=http://mock-services:8080/authorize
+OPENMETER_INGEST_URL=http://mock-services:8080/events
+OPENMETER_API_KEY=mock-local-key
+WEBHOOK_SECRET=dev-secret
+```
+
+Start Kafka, mock services, and the collector:
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile mock up -d --build kafka mock-services openmeter-collector
+```
+
+Produce a sample `create_signed_ticket` event (matches [`openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml) expectations):
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env exec kafka \
+  rpk topic produce livepeer-gateway-events --format '%v' <<'EOF'
+{"type":"create_signed_ticket","data":{"auth_id":"demo-client:demo-user","computed_fee":"1000000000000000","request_id":"smoke-req-1","pipeline":"lv2v","model_id":"daydream-video","pixels":"1920","current_time":"2026-06-24T12:00:00Z"}}
+EOF
+```
+
+Confirm the mock received ingest traffic:
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile mock logs mock-services
+# expected: mock-services: POST /events ... ingest payload=...
 ```
 
 ## Environment variables

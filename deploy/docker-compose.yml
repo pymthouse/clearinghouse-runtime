@@ -72,5 +72,15 @@ services:
       OPENMETER_API_KEY: ${OPENMETER_API_KEY}
       ETH_USD_PRICE: ${ETH_USD_PRICE}
 
+  mock-services:
+    profiles: ["mock"]
+    build:
+      context: ..
+      dockerfile: deploy/mock-services/Dockerfile
+    restart: unless-stopped
+    environment:
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      MOCK_PORT: "8080"
+
 # Signer datadir is bind-mounted from deploy/data (see SIGNER_DATA_DIR).
 # Copy keystore + .eth-password into deploy/data before first run.
