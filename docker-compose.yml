@@ -1,4 +1,4 @@
-# Clearinghouse stack: Redpanda + go-livepeer remote signer + OpenMeter collector.
+# Clearinghouse stack: identity webhook + Redpanda + remote signer + OpenMeter collector.
 #
 # Redpanda is the Kafka-compatible broker. The signer container runs go-livepeer directly —
 # only its signing HTTP port (8081) is published to the host. The CLI/admin port (-cliAddr)
@@ -10,9 +10,25 @@
 #   docker compose up -d --build
 #
 # Kafka + signer only (no metering):
-#   docker compose up -d --build kafka remote-signer
+#   docker compose up -d --build kafka identity-webhook remote-signer
 
 services:
+  identity-webhook:
+    build:
+      context: .
+      dockerfile: identity-webhook/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./identity-webhook/.env
+    environment:
+      PORT: "8090"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
   kafka:
     build:
       context: .
@@ -34,6 +50,8 @@ services:
     restart: unless-stopped
     depends_on:
       kafka:
+        condition: service_healthy
+      identity-webhook:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
