@@ -1,10 +1,7 @@
-# Local signer datadir (symlink or copy from pymthouse/data)
-deploy/data
-
-# Local env secrets
-deploy/.env
-
-# Node dependencies (local dev; Docker runs npm install in the image)
+kafka/.env
+remote-signer/.env
+openmeter-collector/.env
+remote-signer/data/
 node_modules/
 
 # Editor / OS
