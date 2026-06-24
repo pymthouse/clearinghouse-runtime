@@ -4,8 +4,8 @@
 # - Topic carries multiple event types; filter to create_signed_ticket only.
 # - auth_id is expected as "client_id:external_user_id" from the signer webhook response.
 # - Uses first-colon split semantics to preserve compatibility with builder-sdk.
-# - Konnect ingest: POST {OPENMETER_INGEST_URL} (set to ${OPENMETER_URL}/events).
-#   For self-hosted OpenMeter set OPENMETER_INGEST_URL to ${OPENMETER_URL}/api/v1/events.
+# - Konnect ingest: POST OPENMETER_INGEST_URL (e.g. https://<region>.api.konghq.com/v3/openmeter/events).
+#   For self-hosted OpenMeter use https://<host>/api/v1/events.
 
 input:
   kafka:

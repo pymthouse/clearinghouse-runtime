@@ -68,7 +68,6 @@ services:
         condition: service_healthy
     environment:
       <<: *kafka-env
-      OPENMETER_URL: ${OPENMETER_URL}
       OPENMETER_INGEST_URL: ${OPENMETER_INGEST_URL}
       OPENMETER_API_KEY: ${OPENMETER_API_KEY}
       ETH_USD_PRICE: ${ETH_USD_PRICE}

@@ -1,7 +1,26 @@
 # clearinghouse deploy/
 
 Docker Compose stack for the clearinghouse runtime:
-**Kafka/Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
+**Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
+
+## Components
+
+| Service | Role | Docs |
+| --- | --- | --- |
+| **Redpanda** (`kafka`) | Kafka-compatible event bus. The signer publishes gateway events; the collector consumes them. | [Redpanda docs](https://docs.redpanda.com/) |
+| **go-livepeer remote signer** (`remote-signer`) | Signs Livepeer payment tickets and emits `create_signed_ticket` events to Kafka. | [go-livepeer](https://github.com/livepeer/go-livepeer) |
+| **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. | [OpenMeter collector](https://openmeter.io/docs/collectors) |
+| **Konnect / OpenMeter** (external) | Hosted metering and billing API. Set `OPENMETER_INGEST_URL` to your ingest endpoint. | [Konnect OpenMeter](https://docs.konghq.com/konnect/openmeter/), [self-hosted OpenMeter](https://openmeter.io/docs/deploy/kubernetes) |
+
+Data flow:
+
+```text
+Signer HTTP request
+  → identity webhook (/authorize)
+  → signed ticket + Kafka create_signed_ticket event
+  → collector transforms event
+  → OpenMeter ingest API
+```
 
 ## Design decisions
 
@@ -9,25 +28,20 @@ Docker Compose stack for the clearinghouse runtime:
 
 **Identity & auth.** The signer container runs `go-livepeer` directly. Every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls your `/authorize` endpoint with `Authorization: Bearer <WEBHOOK_SECRET>` — no reverse proxy or gateway in front of the signer.
 
-**CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to
-`127.0.0.1:4935` inside the container and is never published or mapped to the
-host. Only the signing HTTP port (`8081`) is exposed.
+**CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host. Only the signing HTTP port (`8081`) is exposed.
 
 ## Local stack
+
+### 1. Quick check — Kafka + signer
+
+Start with the minimum services to confirm the signer and broker are alive. You still need a real identity webhook URL.
 
 ```bash
 cp deploy/.env.example deploy/.env
 $EDITOR deploy/.env
 
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env down
-```
-
-Kafka + signer only (no metering):
-
-```bash
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build kafka remote-signer
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f remote-signer
 ```
 
 Verify CLI port is not published:
@@ -39,12 +53,22 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 # expected: 0.0.0.0:8081
 ```
 
+### 2. Full stack — add metering
+
+Provision OpenMeter meters/features (see [OpenMeter/Konnect bootstrap](#openmeterkonnect-bootstrap)), then set `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, and `ETH_USD_PRICE` in `deploy/.env`.
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env down
+```
+
 ## Environment variables
 
 | Variable | Required | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `REMOTE_SIGNER_WEBHOOK_URL` | yes | — | Identity webhook URL (`/authorize` endpoint) |
-| `WEBHOOK_SECRET` | yes | — | Shared secret passed as `Authorization:Bearer <secret>` to the webhook (from bootstrap) |
+| `WEBHOOK_SECRET` | yes | — | Shared secret passed as `Authorization: Bearer <secret>` to the webhook |
 | `SIGNER_NETWORK` | no | `arbitrum-one-mainnet` | go-livepeer `-network` |
 | `ETH_RPC_URL` | no | public arb1 endpoint | Arbitrum RPC |
 | `SIGNER_ETH_ADDR` | no | — | Funded signer Ethereum address |
@@ -57,10 +81,9 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `KAFKA_ADVERTISED_ADDR` | no | `kafka:9092` | Redpanda advertised Kafka address (broker container) |
 | `KAFKA_BROKERS` | no | `kafka:9092` | Kafka bootstrap servers |
 | `KAFKA_GATEWAY_TOPIC` | no | `livepeer-gateway-events` | Kafka topic |
-| `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (from bootstrap) |
-| `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
-| `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
-| `ETH_USD_PRICE` | yes | - | ETH/USD rate for Wei→USD micros conversion |
+| `OPENMETER_INGEST_URL` | collector only | — | Ingest endpoint. Konnect: `https://<region>.api.konghq.com/v3/openmeter/events`. Self-hosted: `https://<host>/api/v1/events` |
+| `OPENMETER_API_KEY` | collector only | — | Konnect PAT (`kpat_…`) or self-hosted API key |
+| `ETH_USD_PRICE` | collector only | — | ETH/USD rate for Wei→USD micros conversion |
 
 ## OpenMeter/Konnect bootstrap
 
@@ -70,7 +93,7 @@ Use the Go `clearinghouse-bootstrap` CLI or your existing Konnect setup.
 Creates:
 
 | Object | Key | Purpose |
-|--------|-----|---------|
+| --- | --- | --- |
 | Meter | `network_fee_usd_micros` | Raw network cost from signer |
 | Meter | `billable_usd_micros` | Post-markup billable amount (collector phase 2) |
 | Meter | `signed_ticket_count` | Request counts |
