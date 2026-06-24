@@ -49,7 +49,11 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `ETH_RPC_URL` | no | public arb1 endpoint | Arbitrum RPC |
 | `SIGNER_ETH_ADDR` | no | — | Funded signer Ethereum address |
 | `SIGNER_ETH_KEYSTORE_PATH` | no | — | Optional keystore directory or keyfile path passed to `-ethKeystorePath` |
+| `SIGNER_DATA_DIR` | no | `./data` | Host directory bind-mounted to `/data` for signer state, keystore, and password file |
 | `SIGNER_HOST_PORT` | no | `8081` | Host port for the signing HTTP endpoint |
+| `SIGNER_REMOTE_DISCOVERY` | no | `0` | Enables remote signer orchestrator discovery when set to `1` or `true` |
+| `ORCH_WEBHOOK_URL` | no | — | Optional orchestrator discovery webhook passed to `-orchWebhookUrl` when remote discovery is enabled |
+| `LIVE_AI_CAP_REPORT_INTERVAL` | no | — | Optional capacity report interval passed to `-liveAICapReportInterval` when remote discovery is enabled |
 | `KAFKA_ADVERTISED_ADDR` | no | `kafka:9092` | Redpanda advertised Kafka address (broker container) |
 | `KAFKA_BROKERS` | no | `kafka:9092` | Kafka bootstrap servers |
 | `KAFKA_GATEWAY_TOPIC` | no | `livepeer-gateway-events` | Kafka topic |
