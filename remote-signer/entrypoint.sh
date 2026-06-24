@@ -1,23 +1,25 @@
 #!/bin/sh
 set -eu
 
-SIGNER_NETWORK="${SIGNER_NETWORK}"
-SIGNER_PORT="${SIGNER_PORT}"
-ETH_RPC_URL="${ETH_RPC_URL}"
-KAFKA_BROKERS="${KAFKA_BROKERS}"
-KAFKA_GATEWAY_TOPIC="${KAFKA_GATEWAY_TOPIC}"
+if [ -f /service/.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /service/.env
+  set +a
+fi
 
-if [ -z "${REMOTE_SIGNER_WEBHOOK_URL:-}" ]; then
-  echo "entrypoint: REMOTE_SIGNER_WEBHOOK_URL is required (identity webhook URL)" >&2
-  exit 1
-fi
-if [ -z "${WEBHOOK_SECRET:-}" ]; then
-  echo "entrypoint: WEBHOOK_SECRET is required" >&2
-  exit 1
-fi
+SIGNER_NETWORK="${SIGNER_NETWORK:-arbitrum-one-mainnet}"
+SIGNER_PORT="${SIGNER_PORT:-8081}"
+ETH_RPC_URL="${ETH_RPC_URL:-https://arb1.arbitrum.io/rpc}"
+KAFKA_BROKERS="${KAFKA_BROKERS:-kafka:9092}"
+KAFKA_GATEWAY_TOPIC="${KAFKA_GATEWAY_TOPIC:-livepeer-gateway-events}"
 
 if [ ! -f /data/.eth-password ]; then
   echo "" >/data/.eth-password
+fi
+
+if [ -z "${SIGNER_ETH_KEYSTORE_PATH:-}" ] && [ -d /data/keystore ]; then
+  SIGNER_ETH_KEYSTORE_PATH=/data/keystore
 fi
 
 set -- \
@@ -29,11 +31,21 @@ set -- \
   "-ethPassword=/data/.eth-password" \
   "-datadir=/data" \
   -v=99 \
-  "-remoteSignerWebhookUrl=${REMOTE_SIGNER_WEBHOOK_URL}" \
-  "-remoteSignerWebhookHeaders=Authorization:Bearer ${WEBHOOK_SECRET}" \
   -monitor \
   "-kafkaBootstrapServers=${KAFKA_BROKERS}" \
   "-kafkaGatewayTopic=${KAFKA_GATEWAY_TOPIC}"
+
+if [ -n "${REMOTE_SIGNER_WEBHOOK_URL:-}" ]; then
+  if [ -z "${WEBHOOK_SECRET:-}" ]; then
+    echo "entrypoint: WEBHOOK_SECRET is required when REMOTE_SIGNER_WEBHOOK_URL is set" >&2
+    exit 1
+  fi
+  set -- "$@" \
+    "-remoteSignerWebhookUrl=${REMOTE_SIGNER_WEBHOOK_URL}" \
+    "-remoteSignerWebhookHeaders=Authorization:Bearer ${WEBHOOK_SECRET}"
+else
+  echo "entrypoint: WARNING: starting remote signer without identity webhook authorization" >&2
+fi
 
 if [ -n "${SIGNER_ETH_ADDR:-}" ]; then
   set -- "$@" "-ethAcctAddr=${SIGNER_ETH_ADDR}"

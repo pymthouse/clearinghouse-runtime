@@ -2,7 +2,7 @@
 FROM docker.redpanda.com/redpandadata/redpanda:v24.2.4
 
 USER root
-COPY deploy/kafka/entrypoint.sh /clearinghouse-entrypoint.sh
+COPY kafka/entrypoint.sh /clearinghouse-entrypoint.sh
 RUN chmod +x /clearinghouse-entrypoint.sh
 USER redpanda
 

@@ -1,4 +1,4 @@
-# clearinghouse deploy/
+# clearinghouse
 
 Docker Compose stack for the clearinghouse runtime:
 **Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
@@ -24,68 +24,82 @@ Signer HTTP request
 
 ## Design decisions
 
-**Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda Kafka runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
+**Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
 
-**Identity & auth.** The signer container runs `go-livepeer` directly. Every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls your `/authorize` endpoint with `Authorization: Bearer <WEBHOOK_SECRET>` — no reverse proxy or gateway in front of the signer.
+**Identity & auth.** The signer container runs `go-livepeer` directly. In the normal path, every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls your `/authorize` endpoint with `Authorization: Bearer <WEBHOOK_SECRET>` — no reverse proxy or gateway in front of the signer. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host. Only the signing HTTP port (`8081`) is exposed.
+
+**Per-service configuration.** Each service reads a local `.env` file mounted at `/service/.env` and sourced by its entrypoint. Copy the `.env.example` in each service directory before starting the stack.
 
 ## Local stack
 
 ### 1. Quick check — Kafka + signer
 
-Start with the minimum services to confirm the signer and broker are alive. You still need a real identity webhook URL (or the mock profile below).
+Start here before wiring identity or metering. This runs only the Kafka broker and remote signer so you can confirm the core path is alive.
 
 ```bash
-cp deploy/.env.example deploy/.env
-$EDITOR deploy/.env
+cp kafka/.env.example kafka/.env
+cp remote-signer/.env.example remote-signer/.env
+$EDITOR remote-signer/.env
+# For a local alive check without an identity webhook:
+#   REMOTE_SIGNER_WEBHOOK_URL=
+#   WEBHOOK_SECRET=
 
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build kafka remote-signer
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f remote-signer
+docker compose up -d --build kafka remote-signer
+docker compose logs -f remote-signer
 ```
+
+Expected result: `remote-signer` starts cleanly, connects to Kafka, and serves the signing HTTP port.
 
 Verify CLI port is not published:
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-signer 4935
+docker compose port remote-signer 4935
 # expected: no output / error (port is not mapped)
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-signer 8081
+docker compose port remote-signer 8081
 # expected: 0.0.0.0:8081
 ```
 
 ### 2. Full stack — add metering
 
-Provision OpenMeter meters/features (see [OpenMeter/Konnect bootstrap](#openmeterkonnect-bootstrap)), then set `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, and `ETH_USD_PRICE` in `deploy/.env`.
+After the quick check passes, add the OpenMeter collector and hosted metering configuration. Provision OpenMeter meters/features (see [OpenMeter/Konnect bootstrap](#openmeterkonnect-bootstrap)), then configure the collector:
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env down
+cp openmeter-collector/.env.example openmeter-collector/.env
+$EDITOR openmeter-collector/.env
+
+docker compose up -d --build
+docker compose logs -f
+docker compose down
 ```
 
 ### 3. Local smoke test (mock profile)
 
 The `mock` Compose profile starts a tiny HTTP server that accepts signer authorize callbacks and collector ingest POSTs. **Opt in only** — it is not started by default.
 
-Set these in `deploy/.env` when using the mock:
+Set these values when using the mock:
 
 ```bash
+# remote-signer/.env
 REMOTE_SIGNER_WEBHOOK_URL=http://mock-services:8080/authorize
+WEBHOOK_SECRET=dev-secret
+
+# openmeter-collector/.env
 OPENMETER_INGEST_URL=http://mock-services:8080/events
 OPENMETER_API_KEY=mock-local-key
-WEBHOOK_SECRET=dev-secret
 ```
 
 Start Kafka, mock services, and the collector:
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile mock up -d --build kafka mock-services openmeter-collector
+docker compose --profile mock up -d --build kafka mock-services openmeter-collector
 ```
 
 Produce a sample `create_signed_ticket` event (matches [`openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml) expectations):
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env exec kafka \
+docker compose exec kafka \
   rpk topic produce livepeer-gateway-events --format '%v' <<'EOF'
 {"type":"create_signed_ticket","data":{"auth_id":"demo-client:demo-user","computed_fee":"1000000000000000","request_id":"smoke-req-1","pipeline":"lv2v","model_id":"daydream-video","pixels":"1920","current_time":"2026-06-24T12:00:00Z"}}
 EOF
@@ -94,31 +108,34 @@ EOF
 Confirm the mock received ingest traffic:
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile mock logs mock-services
+docker compose --profile mock logs mock-services
 # expected: mock-services: POST /events ... ingest payload=...
 ```
 
 ## Environment variables
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `REMOTE_SIGNER_WEBHOOK_URL` | yes | — | Identity webhook URL (`/authorize` endpoint) |
-| `WEBHOOK_SECRET` | yes | — | Shared secret passed as `Authorization: Bearer <secret>` to the webhook |
-| `SIGNER_NETWORK` | no | `arbitrum-one-mainnet` | go-livepeer `-network` |
-| `ETH_RPC_URL` | no | public arb1 endpoint | Arbitrum RPC |
-| `SIGNER_ETH_ADDR` | no | — | Funded signer Ethereum address |
-| `SIGNER_ETH_KEYSTORE_PATH` | no | — | Optional keystore directory or keyfile path passed to `-ethKeystorePath` |
-| `SIGNER_DATA_DIR` | no | `./data` | Host directory bind-mounted to `/data` for signer state, keystore, and password file |
-| `SIGNER_HOST_PORT` | no | `8081` | Host port for the signing HTTP endpoint |
-| `SIGNER_REMOTE_DISCOVERY` | no | `0` | Enables remote signer orchestrator discovery when set to `1` or `true` |
-| `ORCH_WEBHOOK_URL` | no | — | Optional orchestrator discovery webhook passed to `-orchWebhookUrl` when remote discovery is enabled |
-| `LIVE_AI_CAP_REPORT_INTERVAL` | no | — | Optional capacity report interval passed to `-liveAICapReportInterval` when remote discovery is enabled |
-| `KAFKA_ADVERTISED_ADDR` | no | `kafka:9092` | Redpanda advertised Kafka address (broker container) |
-| `KAFKA_BROKERS` | no | `kafka:9092` | Kafka bootstrap servers |
-| `KAFKA_GATEWAY_TOPIC` | no | `livepeer-gateway-events` | Kafka topic |
-| `OPENMETER_INGEST_URL` | collector only | — | Ingest endpoint. Konnect: `https://<region>.api.konghq.com/v3/openmeter/events`. Self-hosted: `https://<host>/api/v1/events` |
-| `OPENMETER_API_KEY` | collector only | — | Konnect PAT (`kpat_…`) or self-hosted API key |
-| `ETH_USD_PRICE` | collector only | — | ETH/USD rate for Wei→USD micros conversion |
+Each service documents its variables in its own `.env.example`:
+
+| Service | Config file | Key variables |
+| --- | --- | --- |
+| `kafka` | [`kafka/.env.example`](kafka/.env.example) | `KAFKA_ADVERTISED_ADDR` |
+| `remote-signer` | [`remote-signer/.env.example`](remote-signer/.env.example) | `REMOTE_SIGNER_WEBHOOK_URL`, `WEBHOOK_SECRET`, `SIGNER_*`, `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC` |
+| `openmeter-collector` | [`openmeter-collector/.env.example`](openmeter-collector/.env.example) | `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`, `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, `ETH_USD_PRICE` |
+
+Signer state (keystore, `.eth-password`, chain DB) is stored under [`remote-signer/data/`](remote-signer/data/), bind-mounted to `/data` in the container.
+
+```bash
+mkdir -p remote-signer/data/keystore
+cp /path/to/your/keystore/* remote-signer/data/keystore/
+cp /path/to/your/.eth-password remote-signer/data/.eth-password
+
+cp remote-signer/.env.example remote-signer/.env
+$EDITOR remote-signer/.env
+```
+
+Set `SIGNER_ETH_KEYSTORE_PATH=/data/keystore` (container path) and `SIGNER_ETH_ADDR` to your funded signer address. If `SIGNER_ETH_KEYSTORE_PATH` is unset, the entrypoint uses `/data/keystore` when that directory exists.
+
+To change the host signing port from `8081`, use a Compose override file.
 
 ## OpenMeter/Konnect bootstrap
 
@@ -149,7 +166,7 @@ Signer computed_fee (wei)
 ```
 
 Markup rules are defined in the bootstrap CLI catalog. Collector
-pipeline config: [`deploy/openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
+pipeline config: [`openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
 The collector does not yet emit `billable_usd_micros` (phase 2); until then the billable meter
 stays empty while the catalog is ready.
 

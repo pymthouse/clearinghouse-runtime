@@ -1,0 +1,69 @@
+# Clearinghouse stack: Redpanda + go-livepeer remote signer + OpenMeter collector.
+#
+# Redpanda is the Kafka-compatible broker. The signer container runs go-livepeer directly —
+# only its signing HTTP port (8081) is published to the host. The CLI/admin port (-cliAddr)
+# is bound to loopback inside the container and is never exposed or published.
+#
+# Per-service config: copy each service's .env.example to .env before starting.
+#
+# Full stack:
+#   docker compose up -d --build
+#
+# Kafka + signer only (no metering):
+#   docker compose up -d --build kafka remote-signer
+
+services:
+  kafka:
+    build:
+      context: .
+      dockerfile: kafka/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./kafka/.env:/service/.env:ro
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  remote-signer:
+    build:
+      context: .
+      dockerfile: remote-signer/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./remote-signer/.env:/service/.env:ro
+      - ./remote-signer/data:/data
+
+  openmeter-collector:
+    build:
+      context: .
+      dockerfile: openmeter-collector/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./openmeter-collector/.env:/service/.env:ro
+
+  mock-services:
+    profiles: ["mock"]
+    build:
+      context: .
+      dockerfile: deploy/mock-services/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./remote-signer/.env
+    environment:
+      MOCK_PORT: "8080"
+
+# Signer datadir is bind-mounted from remote-signer/data.
+# Copy keystore + .eth-password into remote-signer/data before first run.
