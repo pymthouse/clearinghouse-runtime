@@ -53,7 +53,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env port remote-s
 | `OPENMETER_URL` | yes | — | OpenMeter / Konnect base URL (from bootstrap) |
 | `OPENMETER_INGEST_URL` | yes | — | Ingest endpoint (`${OPENMETER_URL}/events` for Konnect) |
 | `OPENMETER_API_KEY` | yes | — | Konnect PAT (`kpat_…`) (from bootstrap) |
-| `ETH_USD_PRICE` | no | `3500` | ETH/USD rate for Wei→USD micros conversion |
+| `ETH_USD_PRICE` | yes | - | ETH/USD rate for Wei→USD micros conversion |
 
 ## OpenMeter/Konnect bootstrap
 

@@ -31,7 +31,10 @@ pipeline:
         let client_id = if $is_compound { $auth_id.slice(0, $colon) } else { $auth_id }
         let external_user_id = if $is_compound { $auth_id.slice($colon + 1) } else { $auth_id }
 
-        let eth_usd = env("ETH_USD_PRICE").number().or(3500)
+        let eth_usd_str = env("ETH_USD_PRICE").or("").string().trim()
+        let _ = if $eth_usd_str == "" { throw("ETH_USD_PRICE is required") }
+        let eth_usd = $eth_usd_str.number()
+        let _ = if $eth_usd <= 0 { throw("ETH_USD_PRICE must be a positive number") }
         let fee_wei = $data.computed_fee.number().or(0)
         let fee_usd_micros = ($fee_wei * $eth_usd / 1000000000000).round()
 
