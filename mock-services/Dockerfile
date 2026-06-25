@@ -2,8 +2,8 @@
 FROM golang:1.23-alpine AS build
 
 WORKDIR /src
-COPY deploy/mock-services/go.mod ./
-COPY deploy/mock-services/main.go ./
+COPY mock-services/go.mod ./
+COPY mock-services/main.go ./
 RUN CGO_ENABLED=0 go build -o /mock-services .
 
 FROM alpine:3.21

@@ -60,7 +60,7 @@ services:
     profiles: ["mock"]
     build:
       context: .
-      dockerfile: deploy/mock-services/Dockerfile
+      dockerfile: mock-services/Dockerfile
     restart: unless-stopped
     env_file:
       - ./remote-signer/.env
