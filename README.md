@@ -11,6 +11,7 @@ Docker Compose stack for the clearinghouse runtime:
 | **Redpanda** (`kafka`) | Kafka-compatible event bus. The signer publishes gateway events; the collector consumes them. | [Redpanda docs](https://docs.redpanda.com/) |
 | **go-livepeer remote signer** (`remote-signer`) | Signs Livepeer payment tickets and emits `create_signed_ticket` events to Kafka. | [go-livepeer](https://github.com/livepeer/go-livepeer) |
 | **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. | [OpenMeter collector](https://openmeter.io/docs/collectors) |
+| **tenant-admin** (`tenant-admin`) | Per-tenant Auth0 + Konnect provisioning; writes per-tenant SPAT env files consumed by the collector sidecar. | [`tenant-admin/README.md`](tenant-admin/README.md) |
 | **Konnect / OpenMeter** (external) | Hosted metering and billing API. Set `OPENMETER_INGEST_URL` to your ingest endpoint. | [Konnect OpenMeter](https://docs.konghq.com/konnect/openmeter/), [self-hosted OpenMeter](https://openmeter.io/docs/deploy/kubernetes) |
 
 Data flow:
@@ -27,7 +28,7 @@ Signer HTTP request
 
 **Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
 
-**Identity & auth.** The in-compose **identity-webhook** uses builder-sdk's API-key provider. The signer container runs `go-livepeer` directly; every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`. End users present `Authorization: Bearer sk_…` to the signer; the webhook resolves the key to `auth_id = "{client_id}:{usage_subject}"`. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
+**Identity & auth.** The in-compose **identity-webhook** uses builder-sdk's API-key provider (and optional **OIDC** when `JWT_ISSUER` is set). The signer container runs `go-livepeer` directly; every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`. End users present `Authorization: Bearer sk_…` to the signer; the webhook resolves the key to `auth_id = "{tenant_id}:{client_id}:{usage_subject}"`. With `USAGE_QUERY_ENABLED=1`, it also serves self-scoped usage/balance reads from OpenMeter. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host. Only the signing HTTP port (`8081`) is exposed.
 
@@ -61,7 +62,19 @@ docker compose exec identity-webhook \
     -H "Authorization: Bearer dev-webhook-secret-change-me" \
     -H "Content-Type: application/json" \
     -d '{"headers":{"Authorization":["Bearer sk_demo_local_key"]}}'
-# expected: "status":200, "auth_id":"demo-client:demo-user"
+# expected: "status":200, "auth_id":"demo:demo-client:demo-user"
+```
+
+Self-scoped usage reads (requires `USAGE_QUERY_ENABLED=1` and `OPENMETER_URL` + `OPENMETER_API_KEY` in `identity-webhook/.env`):
+
+```bash
+docker compose exec identity-webhook \
+  curl -sS http://localhost:8090/api/v1/apps/demo-client/usage/me/balance \
+    -H "Authorization: Bearer sk_demo_local_key"
+
+docker compose exec identity-webhook \
+  curl -sS "http://localhost:8090/api/v1/apps/demo-client/usage/me?startDate=2026-01-01T00:00:00.000Z&endDate=2026-01-31T23:59:59.999Z" \
+    -H "Authorization: Bearer sk_demo_local_key"
 ```
 
 Expected result: `remote-signer` starts cleanly, connects to Kafka, and serves the signing HTTP port.
@@ -94,10 +107,11 @@ Each service documents its variables in its own `.env.example`:
 
 | Service | Config file | Key variables |
 | --- | --- | --- |
-| `identity-webhook` | [`identity-webhook/.env.example`](identity-webhook/.env.example) | `WEBHOOK_SECRET`, `IDENTITY_ISSUER`, `DEMO_API_KEY`, `DEMO_CLIENT_ID`, `DEMO_USER_ID`, `API_KEY_PREFIX` (optional, default `sk_`) |
+| `identity-webhook` | [`identity-webhook/.env.example`](identity-webhook/.env.example) | `WEBHOOK_SECRET`, `IDENTITY_ISSUER`, `DEMO_API_KEY`, `DEMO_TENANT_ID`, `DEMO_CLIENT_ID`, `DEMO_USER_ID`, `USAGE_QUERY_ENABLED`, `OPENMETER_*`, `JWT_ISSUER` |
 | `kafka` | [`kafka/.env.example`](kafka/.env.example) | `KAFKA_ADVERTISED_ADDR` |
 | `remote-signer` | [`remote-signer/.env.example`](remote-signer/.env.example) | `REMOTE_SIGNER_WEBHOOK_URL`, `WEBHOOK_SECRET`, `SIGNER_*`, `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC` |
-| `openmeter-collector` | [`openmeter-collector/.env.example`](openmeter-collector/.env.example) | `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`, `OPENMETER_URL`, `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, `OPENMETER_DEFAULT_PLAN_KEY`, `ETH_USD_PRICE` |
+| `openmeter-collector` | [`openmeter-collector/.env.example`](openmeter-collector/.env.example) | `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`, `OPENMETER_URL`, `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, `OPENMETER_DEFAULT_PLAN_KEY`, `ETH_USD_PRICE`, `DEFAULT_TENANT_ID` |
+| `tenant-admin` | [`tenant-admin/.env.example`](tenant-admin/.env.example) | `ADMIN_SECRET`, `KONNECT_PLATFORM_PAT`, `AUTH0_MGMT_*`, `OPENMETER_URL` |
 
 Signer state (keystore, `.eth-password`, chain DB) is stored under [`remote-signer/data/`](remote-signer/data/), bind-mounted to `/data` in the container.
 
@@ -153,9 +167,9 @@ OpenMeter admin credentials — the identity webhook does **not** need them.
 
 For each `create_signed_ticket` event:
 
-1. Benthos maps the CloudEvent (including `billable_usd_micros`, initially equal to `network_fee_usd_micros`).
+1. Benthos maps the CloudEvent (including `tenant_id` and `billable_usd_micros`, initially equal to `network_fee_usd_micros`).
 2. `POST http://127.0.0.1:8091/ensure` idempotently creates customer + subscription (`OPENMETER_DEFAULT_PLAN_KEY`).
-3. Event is ingested to Konnect.
+3. Event is proxied to Konnect via `POST http://127.0.0.1:8091/ingest` (rewrites subject to surrogate customer key; uses per-tenant SPAT when available).
 4. On ingest failure (e.g. `no customer found for event subject`), the collector ensures again and retries once.
 
 ### Future admin/query boundary (OAuth later)
@@ -170,10 +184,63 @@ The collector provision sidecar is the thin local equivalent until that gateway 
 
 ### Identity contract (collector)
 
-The collector expects Kafka `auth_id` as `client_id:external_user_id` (first-colon split).
-Konnect customer key matches that compound id (e.g. `demo-client:demo-user`).
+The collector expects Kafka `auth_id` as `tenant_id:client_id:external_user_id` (three-part split), with legacy two-part fallback when `DEFAULT_TENANT_ID` is set.
+OpenMeter customer keys use a deterministic surrogate (`ch_<hash>`), not the raw auth tuple.
 
-Demo API key defaults: `sk_demo_local_key` → `demo-client:demo-user` (configured in `identity-webhook/.env`).
+Demo API key defaults: `sk_demo_local_key` → `demo:demo-client:demo-user` (configured in `identity-webhook/.env`).
 
 Customer upsert is handled by the collector provision sidecar (see above). The Go bootstrap CLI
 still provisions meters/features/plans; per-event customer+subscription ensure runs in the collector.
+
+## tenant-admin (per-tenant provisioning)
+
+[`tenant-admin`](tenant-admin/) adds a Go admin service/CLI for per-tenant onboarding:
+
+- Auth0 organization + tenant admin users.
+- Konnect team + per-tenant system account.
+- Per-tenant SPAT token (for collector/plugin ingest).
+- Metering role set assignment on the tenant system account (`Ingest`, `Meter Admin`, `Product Catalog Admin`, `Billing Admin`).
+- Optional sample customer+subscription ensure in OpenMeter.
+
+Run as part of compose:
+
+```bash
+cp tenant-admin/.env.example tenant-admin/.env
+$EDITOR tenant-admin/.env
+
+docker compose up -d --build tenant-admin
+```
+
+Health check:
+
+```bash
+curl -sS http://localhost:8093/health
+```
+
+Provision a tenant:
+
+```bash
+curl -sS -X POST http://localhost:8093/admin/tenants \
+  -H "Authorization: Bearer $ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId":"acme",
+    "tenantName":"Acme Inc",
+    "adminEmails":["admin@acme.com"],
+    "adminPassword":"ChangeMe123!",
+    "clientId":"app_acme",
+    "externalUserId":"bootstrap-user",
+    "enableSampleUser":true
+  }'
+```
+
+The response includes a one-time `spat` value and a gitignored tenant env file path under `tenant-admin/data`.
+
+If billing provider prerequisites are not yet set for a customer, tenant-admin returns `status: "pending_billing_setup"` with an empty `subscriptionId` instead of failing the entire operation.
+
+### Ingest scope note (Konnect SaaS)
+
+Konnect SaaS isolation here is team + machine-token based. It is not Kong Gateway Enterprise Workspace partitioning.
+
+- The collector sidecar resolves tenant SPATs from `tenant-admin/data/.env.<tenant>` and proxies ingest through `POST /ingest`.
+- Tenant segmentation is enforced by per-tenant SPAT rotation/revocation plus surrogate subject/customer keying and `tenant_id` meter dimensions.

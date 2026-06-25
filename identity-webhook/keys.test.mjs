@@ -13,10 +13,22 @@ describe("loadApiKeyStore", () => {
 
     assert.equal(store.size, 1);
     assert.deepEqual(store.get("sk_demo_local_key"), {
+      tenantId: "default",
       clientId: "demo-client",
       userId: "demo-user",
       usageSubjectType: "api_key_user",
     });
+  });
+
+  it("uses DEMO_TENANT_ID for the primary demo key", () => {
+    const store = loadApiKeyStore({
+      DEMO_API_KEY: "sk_demo_local_key",
+      DEMO_TENANT_ID: "demo",
+      DEMO_CLIENT_ID: "demo-client",
+      DEMO_USER_ID: "demo-user",
+    });
+
+    assert.equal(store.get("sk_demo_local_key").tenantId, "demo");
   });
 
   it("loads extra keys from DEMO_API_KEYS with snake_case fields", () => {
@@ -28,6 +40,7 @@ describe("loadApiKeyStore", () => {
 
     assert.equal(store.size, 1);
     assert.deepEqual(store.get("sk_other"), {
+      tenantId: "default",
       clientId: "app-b",
       userId: "user-b",
       usageSubjectType: "api_key_user",

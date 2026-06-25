@@ -2,6 +2,9 @@ kafka/.env
 remote-signer/.env
 openmeter-collector/.env
 identity-webhook/.env
+tenant-admin/.env
+tenant-admin/data/
+tenant-admin/.env.*
 remote-signer/data/
 node_modules/
 

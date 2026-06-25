@@ -18,10 +18,16 @@ services:
       context: .
       dockerfile: identity-webhook/Dockerfile
     restart: unless-stopped
+    ports:
+      - "${IDENTITY_WEBHOOK_HOST_PORT:-8090}:8090"
     env_file:
       - ./identity-webhook/.env
     environment:
       PORT: "8090"
+      TENANT_ADMIN_DATA_DIR: /tenant-admin-data
+      TENANT_REGISTRY_PATH: /tenant-admin-data/apps.json
+    volumes:
+      - ./tenant-admin/data:/tenant-admin-data:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
       interval: 10s
@@ -69,8 +75,26 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    environment:
+      TENANT_ADMIN_DATA_DIR: /tenant-admin-data
     volumes:
       - ./openmeter-collector/.env:/service/.env:ro
+      - ./tenant-admin/data:/tenant-admin-data:ro
+
+  tenant-admin:
+    build:
+      context: .
+      dockerfile: tenant-admin/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${TENANT_ADMIN_HOST_PORT:-8093}:8093"
+    env_file:
+      - ./tenant-admin/.env
+    environment:
+      TENANT_ADMIN_LISTEN_ADDR: ":8093"
+      TENANT_ADMIN_DATA_DIR: /app/data
+    volumes:
+      - ./tenant-admin/data:/app/data
 
 # Signer datadir is bind-mounted from remote-signer/data.
 # Copy keystore + .eth-password into remote-signer/data before first run.

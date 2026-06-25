@@ -1,9 +1,13 @@
 import { createServer } from "node:http";
 import {
   createApiKeyEndUserVerifier,
-  routeRemoteSignerWebhookRequest,
+  createFirstMatchEndUserVerifier,
+  createOidcEndUserVerifier,
+  routeIdentityServiceRequest,
 } from "@pymthouse/builder-sdk/signer/webhook";
+import { buildAuthId } from "./billing-identity.mjs";
 import { loadApiKeyStore } from "./keys.mjs";
+import { createOpenMeterUsageReaders, isUsageQueryEnabled } from "./openmeter-read.mjs";
 
 const port = Number(process.env.PORT || 8090);
 
@@ -15,27 +19,69 @@ function required(name) {
   return value;
 }
 
+function defaultSignerWebhookJwtAudience(jwtIssuer) {
+  return jwtIssuer.trim().replace(/\/+$/, "");
+}
+
 const keyStore = loadApiKeyStore(process.env);
+
+const apiKeyVerifier = createApiKeyEndUserVerifier({
+  issuer: required("IDENTITY_ISSUER"),
+  apiKeyPrefix: process.env.API_KEY_PREFIX?.trim() || "sk_",
+  defaultClientId: process.env.DEMO_CLIENT_ID?.trim() || "demo-client",
+  defaultUsageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "api_key_user",
+  resolveApiKey: async (apiKey) => {
+    const entry = keyStore.get(apiKey);
+    if (!entry) {
+      return null;
+    }
+    return {
+      userId: entry.userId,
+      tenantId: entry.tenantId,
+      clientId: entry.clientId,
+      usageSubjectType: entry.usageSubjectType,
+    };
+  },
+});
+
+function createEndUserAuth() {
+  const jwtIssuer = process.env.JWT_ISSUER?.trim();
+  if (!jwtIssuer) {
+    return apiKeyVerifier;
+  }
+
+  const jwtAudience =
+    process.env.JWT_AUDIENCE?.trim() || defaultSignerWebhookJwtAudience(jwtIssuer);
+
+  const oidcVerifier = createOidcEndUserVerifier({
+    webhookSecret: required("WEBHOOK_SECRET"),
+    jwtIssuer,
+    jwtAudience,
+    claimMapping: {
+      claimClientId: process.env.CLAIM_CLIENT_ID?.trim() || "client_id",
+      claimUsageSubject: process.env.CLAIM_USAGE_SUBJECT?.trim() || "sub",
+      usageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "external_user_id",
+    },
+    allowInsecureHttp: process.env.ALLOW_INSECURE_HTTP?.trim() === "1",
+  });
+
+  return createFirstMatchEndUserVerifier([apiKeyVerifier, oidcVerifier]);
+}
+
+const endUserAuth = createEndUserAuth();
+const openMeterReaders = createOpenMeterUsageReaders(process.env, keyStore);
 
 const config = {
   webhookSecret: required("WEBHOOK_SECRET"),
-  endUserAuth: createApiKeyEndUserVerifier({
-    issuer: required("IDENTITY_ISSUER"),
-    apiKeyPrefix: process.env.API_KEY_PREFIX?.trim() || "sk_",
-    defaultClientId: process.env.DEMO_CLIENT_ID?.trim() || "demo-client",
-    defaultUsageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "api_key_user",
-    resolveApiKey: async (apiKey) => {
-      const entry = keyStore.get(apiKey);
-      if (!entry) {
-        return null;
+  endUserAuth,
+  ...(openMeterReaders
+    ? {
+        endUserUsage: {
+          readBalance: openMeterReaders.readBalance,
+          readUsage: openMeterReaders.readUsage,
+        },
       }
-      return {
-        userId: entry.userId,
-        clientId: entry.clientId,
-        usageSubjectType: entry.usageSubjectType,
-      };
-    },
-  }),
+    : {}),
 };
 
 function readBody(req) {
@@ -71,15 +117,56 @@ async function handleRequest(req, res) {
     body: body?.length ? body : undefined,
   });
 
-  const response = await routeRemoteSignerWebhookRequest(request, config);
+  const response = await routeIdentityServiceRequest(request, config);
   if (!response) {
     res.writeHead(404);
     res.end();
     return;
   }
 
+  const responseText = await response.text();
+  let outgoingBody = responseText;
+  if (req.method === "POST" && req.url === "/authorize" && response.status === 200) {
+    try {
+      const payload = JSON.parse(responseText);
+      if (payload?.status === 200 && payload?.identity) {
+        const apiKey = extractEndUserApiKey(body);
+        const entry = apiKey ? keyStore.get(apiKey) : undefined;
+        const tenantId = entry?.tenantId?.trim();
+        if (tenantId) {
+          payload.auth_id = buildAuthId(
+            tenantId,
+            payload.identity.client_id,
+            payload.identity.usage_subject,
+          );
+          outgoingBody = JSON.stringify(payload);
+        }
+      }
+    } catch {
+      // Keep original authorize response on parse errors.
+    }
+  }
+
   res.writeHead(response.status, Object.fromEntries(response.headers));
-  res.end(await response.text());
+  res.end(outgoingBody);
+}
+
+function extractEndUserApiKey(rawBody) {
+  if (!rawBody?.length) {
+    return "";
+  }
+  try {
+    const payload = JSON.parse(rawBody.toString("utf8"));
+    const headerValues = payload?.headers?.Authorization ?? payload?.headers?.authorization;
+    const authorization = Array.isArray(headerValues) ? headerValues[0] : headerValues;
+    if (typeof authorization !== "string") {
+      return "";
+    }
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    return match?.[1]?.trim() ?? "";
+  } catch {
+    return "";
+  }
 }
 
 createServer((req, res) => {
@@ -91,5 +178,6 @@ createServer((req, res) => {
     res.end("internal error");
   });
 }).listen(port, "0.0.0.0", () => {
-  console.log(`identity-webhook (api-key) listening on :${port}`);
+  const usageMode = isUsageQueryEnabled(process.env) ? "openmeter usage reads" : "authorize only";
+  console.log(`identity-webhook listening on :${port} (${usageMode})`);
 });

@@ -11,6 +11,6 @@
     "test": "node --test keys.test.mjs"
   },
   "dependencies": {
-    "@pymthouse/builder-sdk": "0.4.6"
+    "@pymthouse/builder-sdk": "0.4.7-rc.0"
   }
 }
