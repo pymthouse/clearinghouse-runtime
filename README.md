@@ -7,7 +7,8 @@ Docker Compose stack for the clearinghouse runtime:
 
 | Service | Role | Docs |
 | --- | --- | --- |
-| **identity-webhook** (`identity-webhook`) | Resolves end-user API keys to `auth_id` for go-livepeer's `/authorize` hook. Uses builder-sdk's API-key provider. | [builder-sdk](https://github.com/pymthouse/builder-sdk) |
+| **identity-webhook** (`identity-webhook`) | Resolves end-user API keys / Auth0 JWTs to `auth_id` for go-livepeer's `/authorize` hook. Uses builder-sdk. | [builder-sdk](https://github.com/pymthouse/builder-sdk) |
+| **tenant-admin** (`tenant-admin`) | Tenant registry API/CLI; links Auth0 `auth0ClientId` → billing `clientId`. | [`tenant-admin/README.md`](tenant-admin/README.md) |
 | **Redpanda** (`kafka`) | Kafka-compatible event bus. The signer publishes gateway events; the collector consumes them. | [Redpanda docs](https://docs.redpanda.com/) |
 | **go-livepeer remote signer** (`remote-signer`) | Signs Livepeer payment tickets and emits `create_signed_ticket` events to Kafka. | [go-livepeer](https://github.com/livepeer/go-livepeer) |
 | **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. | [OpenMeter collector](https://openmeter.io/docs/collectors) |
@@ -27,7 +28,7 @@ Signer HTTP request
 
 **Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
 
-**Identity & auth.** The in-compose **identity-webhook** uses builder-sdk's API-key provider. The signer container runs `go-livepeer` directly; every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`. End users present `Authorization: Bearer sk_…` to the signer; the webhook resolves the key to `auth_id = "{client_id}:{usage_subject}"`. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
+**Identity & auth.** The in-compose **identity-webhook** uses builder-sdk's API-key provider (and optional **Auth0 OIDC** when `JWT_ISSUER` is set). The signer container runs `go-livepeer` directly; every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`. End users present `Authorization: Bearer sk_…` to the signer; the webhook resolves the key to `auth_id = "{tenant_id}:{client_id}:{usage_subject}"`. **tenant-admin** maintains the tenant registry (`data/apps.json`) including Auth0 public client id (`auth0ClientId` / JWT `azp`) → billing `clientId` mapping. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host. Only the signing HTTP port (`8081`) is exposed.
 
@@ -61,7 +62,7 @@ docker compose exec identity-webhook \
     -H "Authorization: Bearer dev-webhook-secret-change-me" \
     -H "Content-Type: application/json" \
     -d '{"headers":{"Authorization":["Bearer sk_demo_local_key"]}}'
-# expected: "status":200, "auth_id":"demo-client:demo-user"
+# expected: "status":200, "auth_id":"demo:demo-client:demo-user"
 ```
 
 Expected result: `remote-signer` starts cleanly, connects to Kafka, and serves the signing HTTP port.
@@ -113,6 +114,50 @@ $EDITOR remote-signer/.env
 Set `SIGNER_ETH_KEYSTORE_PATH=/data/keystore` (container path) and `SIGNER_ETH_ADDR` to your funded signer address. If `SIGNER_ETH_KEYSTORE_PATH` is unset, the entrypoint uses `/data/keystore` when that directory exists.
 
 To change the host signing port from `8081`, use a Compose override file.
+
+## tenant-admin (tenant registry + Auth0 wiring)
+
+[`tenant-admin`](tenant-admin/) is a lightweight registry API/CLI on port **8093**. It maps:
+
+- **billing `clientId`** (e.g. `demo-client`, `app_acme`) — middle segment of `auth_id`
+- **`auth0ClientId`** — Auth0 public client id from bootstrap (`AUTH0_PUBLIC_CLIENT_ID`, JWT `azp`)
+
+```bash
+cp tenant-admin/.env.example tenant-admin/.env
+$EDITOR tenant-admin/.env
+
+docker compose up -d --build tenant-admin identity-webhook
+```
+
+### Provision a tenant (API)
+
+```bash
+curl -sS -X POST http://localhost:8093/admin/tenants \
+  -H "Authorization: Bearer $ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId":"acme",
+    "tenantName":"Acme Inc",
+    "clientId":"app_acme",
+    "auth0ClientId":"<AUTH0_PUBLIC_CLIENT_ID>"
+  }'
+```
+
+### Link auth0-livepeer bootstrap output
+
+After `npm run bootstrap` in [`auth0-livepeer`](../auth0-livepeer):
+
+```bash
+node tenant-admin/cli.mjs sync-auth0-bootstrap \
+  --bootstrap-env ../auth0-livepeer/.env.livepeer \
+  --tenant-id demo \
+  --client-id demo-client \
+  --tenant-name "Demo"
+```
+
+Then copy Auth0 webhook vars from `.env.livepeer` into `identity-webhook/.env` (`JWT_ISSUER`, `JWT_AUDIENCE`, `CLAIM_CLIENT_ID=azp`, etc.).
+
+See [`tenant-admin/README.md`](tenant-admin/README.md).
 
 ## OpenMeter/Konnect bootstrap
 

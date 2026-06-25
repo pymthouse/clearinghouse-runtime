@@ -1,9 +1,13 @@
 import { createServer } from "node:http";
 import {
   createApiKeyEndUserVerifier,
+  createFirstMatchEndUserVerifier,
+  createOidcEndUserVerifier,
   routeRemoteSignerWebhookRequest,
 } from "@pymthouse/builder-sdk/signer/webhook";
+import { buildAuthId } from "./billing-identity.mjs";
 import { loadApiKeyStore } from "./keys.mjs";
+import { createTenantRegistryIndex } from "./tenant-registry.mjs";
 
 const port = Number(process.env.PORT || 8090);
 
@@ -15,28 +19,96 @@ function required(name) {
   return value;
 }
 
+function defaultSignerWebhookJwtAudience(jwtIssuer) {
+  return jwtIssuer.trim().replace(/\/+$/, "");
+}
+
+const tenantRegistry = createTenantRegistryIndex(process.env);
 const keyStore = loadApiKeyStore(process.env);
+
+const apiKeyVerifier = createApiKeyEndUserVerifier({
+  issuer: required("IDENTITY_ISSUER"),
+  apiKeyPrefix: process.env.API_KEY_PREFIX?.trim() || "sk_",
+  defaultClientId: process.env.DEMO_CLIENT_ID?.trim() || "demo-client",
+  defaultUsageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "api_key_user",
+  resolveApiKey: async (apiKey) => {
+    const entry = keyStore.get(apiKey);
+    if (!entry) {
+      return null;
+    }
+    return {
+      userId: entry.userId,
+      tenantId: entry.tenantId,
+      clientId: entry.clientId,
+      usageSubjectType: entry.usageSubjectType,
+    };
+  },
+});
+
+function createEndUserAuth() {
+  const jwtIssuer = process.env.JWT_ISSUER?.trim();
+  if (!jwtIssuer) {
+    return apiKeyVerifier;
+  }
+
+  const jwtAudience =
+    process.env.JWT_AUDIENCE?.trim() || defaultSignerWebhookJwtAudience(jwtIssuer);
+
+  const oidcVerifier = createOidcEndUserVerifier({
+    webhookSecret: required("WEBHOOK_SECRET"),
+    jwtIssuer,
+    jwtAudience,
+    claimMapping: {
+      claimClientId: process.env.CLAIM_CLIENT_ID?.trim() || "azp",
+      claimUsageSubject: process.env.CLAIM_USAGE_SUBJECT?.trim() || "sub",
+      usageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "auth0_user_id",
+    },
+    allowInsecureHttp: process.env.ALLOW_INSECURE_HTTP?.trim() === "1",
+  });
+
+  return createFirstMatchEndUserVerifier([apiKeyVerifier, oidcVerifier]);
+}
 
 const config = {
   webhookSecret: required("WEBHOOK_SECRET"),
-  endUserAuth: createApiKeyEndUserVerifier({
-    issuer: required("IDENTITY_ISSUER"),
-    apiKeyPrefix: process.env.API_KEY_PREFIX?.trim() || "sk_",
-    defaultClientId: process.env.DEMO_CLIENT_ID?.trim() || "demo-client",
-    defaultUsageSubjectType: process.env.USAGE_SUBJECT_TYPE?.trim() || "api_key_user",
-    resolveApiKey: async (apiKey) => {
-      const entry = keyStore.get(apiKey);
-      if (!entry) {
-        return null;
-      }
-      return {
-        userId: entry.userId,
-        clientId: entry.clientId,
-        usageSubjectType: entry.usageSubjectType,
-      };
-    },
-  }),
+  endUserAuth: createEndUserAuth(),
 };
+
+function enrichAuthorizeResponse(responseText, rawBody) {
+  try {
+    const payload = JSON.parse(responseText);
+    if (payload?.status !== 200 || !payload?.identity) {
+      return responseText;
+    }
+
+    const identity = payload.identity;
+    const apiKey = extractEndUserApiKey(rawBody);
+    const keyEntry = apiKey ? keyStore.get(apiKey) : undefined;
+
+    let tenantId = keyEntry?.tenantId?.trim() || null;
+    let billingClientId = keyEntry?.clientId?.trim() || null;
+    const jwtClientId = String(identity.client_id ?? "").trim();
+    const jwtAuth0ClientId =
+      process.env.CLAIM_CLIENT_ID?.trim() === "azp" ? jwtClientId : "";
+
+    if (!tenantId) {
+      tenantId = tenantRegistry.resolveTenantId(jwtClientId, jwtAuth0ClientId);
+    }
+    if (!billingClientId) {
+      billingClientId =
+        tenantRegistry.billingClientId(jwtClientId, jwtAuth0ClientId) || jwtClientId;
+    }
+
+    if (tenantId && billingClientId && identity.usage_subject) {
+      payload.auth_id = buildAuthId(tenantId, billingClientId, identity.usage_subject);
+      return JSON.stringify(payload);
+    }
+
+    return responseText;
+  } catch {
+    return responseText;
+  }
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -45,6 +117,24 @@ function readBody(req) {
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
+}
+
+function extractEndUserApiKey(rawBody) {
+  if (!rawBody?.length) {
+    return "";
+  }
+  try {
+    const payload = JSON.parse(rawBody.toString("utf8"));
+    const headerValues = payload?.headers?.Authorization ?? payload?.headers?.authorization;
+    const authorization = Array.isArray(headerValues) ? headerValues[0] : headerValues;
+    if (typeof authorization !== "string") {
+      return "";
+    }
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    return match?.[1]?.trim() ?? "";
+  } catch {
+    return "";
+  }
 }
 
 async function handleRequest(req, res) {
@@ -78,8 +168,13 @@ async function handleRequest(req, res) {
     return;
   }
 
+  let responseText = await response.text();
+  if (req.method === "POST" && req.url === "/authorize" && response.status === 200) {
+    responseText = enrichAuthorizeResponse(responseText, body);
+  }
+
   res.writeHead(response.status, Object.fromEntries(response.headers));
-  res.end(await response.text());
+  res.end(responseText);
 }
 
 createServer((req, res) => {
@@ -91,5 +186,6 @@ createServer((req, res) => {
     res.end("internal error");
   });
 }).listen(port, "0.0.0.0", () => {
-  console.log(`identity-webhook (api-key) listening on :${port}`);
+  const mode = process.env.JWT_ISSUER?.trim() ? "api-key + auth0 oidc" : "api-key";
+  console.log(`identity-webhook (${mode}) listening on :${port}`);
 });

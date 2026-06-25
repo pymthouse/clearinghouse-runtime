@@ -18,12 +18,38 @@ services:
       context: .
       dockerfile: identity-webhook/Dockerfile
     restart: unless-stopped
+    ports:
+      - "${IDENTITY_WEBHOOK_HOST_PORT:-8090}:8090"
     env_file:
       - ./identity-webhook/.env
     environment:
       PORT: "8090"
+      TENANT_REGISTRY_PATH: /tenant-admin-data/apps.json
+    volumes:
+      - ./tenant-admin/data:/tenant-admin-data:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  tenant-admin:
+    build:
+      context: .
+      dockerfile: tenant-admin/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${TENANT_ADMIN_HOST_PORT:-8093}:8093"
+    env_file:
+      - ./tenant-admin/.env
+    environment:
+      PORT: "8093"
+      TENANT_ADMIN_DATA_DIR: /app/data
+    volumes:
+      - ./tenant-admin/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8093/health"]
       interval: 10s
       timeout: 5s
       retries: 6

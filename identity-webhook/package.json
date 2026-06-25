@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test keys.test.mjs"
+    "test": "node --test keys.test.mjs tenant-registry.test.mjs"
   },
   "dependencies": {
     "@pymthouse/builder-sdk": "0.4.6"

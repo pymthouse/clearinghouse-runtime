@@ -1,0 +1,14 @@
+{
+  "name": "@livepeer/clearinghouse-tenant-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lightweight tenant registry API for clearinghouse (Auth0 client wiring)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test registry.test.mjs"
+  }
+}

@@ -13,6 +13,7 @@ describe("loadApiKeyStore", () => {
 
     assert.equal(store.size, 1);
     assert.deepEqual(store.get("sk_demo_local_key"), {
+      tenantId: "default",
       clientId: "demo-client",
       userId: "demo-user",
       usageSubjectType: "api_key_user",
@@ -28,6 +29,7 @@ describe("loadApiKeyStore", () => {
 
     assert.equal(store.size, 1);
     assert.deepEqual(store.get("sk_other"), {
+      tenantId: "default",
       clientId: "app-b",
       userId: "user-b",
       usageSubjectType: "api_key_user",
