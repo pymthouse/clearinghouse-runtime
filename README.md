@@ -142,10 +142,11 @@ Signer computed_fee (wei)
             → clearinghouse_default_ppu subscription per customer
 ```
 
-Markup rules are defined in the bootstrap CLI catalog. Collector
-pipeline config: [`openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
-The collector does not yet emit `billable_usd_micros` (phase 2); until then the billable meter
-stays empty while the catalog is ready.
+Collector pipeline config: [`openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
+The collector emits `billable_usd_micros` as an interim passthrough equal to
+`network_fee_usd_micros` so the billable meter validates and accumulates. Phase-2
+markup rules (network × pipeline/model multiplier) are not applied yet — until then
+`billable_usd_micros == network_fee_usd_micros`.
 
 ### Identity contract (collector)
 

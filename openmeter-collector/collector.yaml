@@ -142,6 +142,9 @@ pipeline:
               "usage_subject_type": $usage_subject_type,
               "external_user_id": $usage_subject_parsed,
               "network_fee_usd_micros": $fee_usd_micros,
+              # Interim passthrough: billable == network fee until phase-2 markup
+              # rules are applied. Present so the billable_usd_micros meter validates.
+              "billable_usd_micros": $fee_usd_micros,
               "pipeline": if $data.pipeline != "" && $data.pipeline != null { $data.pipeline } else { "unknown" },
               "model_id": if $data.model_id != "" && $data.model_id != null { $data.model_id } else { "unknown" },
               "pixels": $data.pixels.string().or("0"),
