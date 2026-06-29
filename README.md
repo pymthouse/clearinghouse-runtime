@@ -1,12 +1,13 @@
 # clearinghouse
 
 Docker Compose stack for the clearinghouse runtime:
-**Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
+**identity-webhook → Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
 
 ## Components
 
 | Service | Role | Docs |
 | --- | --- | --- |
+| **identity-webhook** (`identity-webhook`) | Resolves end-user API keys to `auth_id` for go-livepeer's `/authorize` hook. Uses builder-sdk's API-key provider. | [builder-sdk](https://github.com/pymthouse/builder-sdk) |
 | **Redpanda** (`kafka`) | Kafka-compatible event bus. The signer publishes gateway events; the collector consumes them. | [Redpanda docs](https://docs.redpanda.com/) |
 | **go-livepeer remote signer** (`remote-signer`) | Signs Livepeer payment tickets and emits `create_signed_ticket` events to Kafka. | [go-livepeer](https://github.com/livepeer/go-livepeer) |
 | **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. | [OpenMeter collector](https://openmeter.io/docs/collectors) |
@@ -26,43 +27,44 @@ Signer HTTP request
 
 **Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
 
-**Identity & auth.** The signer container runs `go-livepeer` directly. In the normal path, every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls your `/authorize` endpoint with `Authorization: Bearer <WEBHOOK_SECRET>` — no reverse proxy or gateway in front of the signer. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
+**Identity & auth.** The in-compose **identity-webhook** uses builder-sdk's API-key provider. The signer container runs `go-livepeer` directly; every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`. End users present `Authorization: Bearer sk_…` to the signer; the webhook resolves the key to `auth_id = "{client_id}:{usage_subject}"`. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
 
-**CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host.
+**CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host. Only the signing HTTP port (`8081`) is exposed.
 
-**Signing port is loopback-only by default.** `8081` is published as `127.0.0.1:8081:8081` — host-only, not the network. `/generate-live-payment` mints PM tickets from the operator's on-chain deposit, and with `REMOTE_SIGNER_WEBHOOK_URL` unset it has **no auth** — anyone who reaches it can drain the deposit. Expose it (`0.0.0.0:8081:8081` or a reverse proxy) **only with the webhook set**.
-
-**Per-service configuration.** Each service reads a local `.env` file mounted at `/service/.env` and sourced by its entrypoint. Copy the `.env.example` in each service directory before starting the stack.
+**Per-service configuration.** Each service has a local `.env` file (copy from `.env.example` before starting). Kafka, remote-signer, and openmeter-collector mount theirs at `/service/.env` and source it in the entrypoint. identity-webhook reads its `.env` via Compose `env_file`.
 
 ## Local stack
 
-### 1. Quick check — Kafka + signer
+### 1. Quick check — Kafka + identity webhook + signer
 
-Start here before wiring identity or metering. This runs only the Kafka broker and remote signer so you can confirm the core path is alive.
+Start here before wiring metering. This runs the broker, identity webhook, and remote signer.
 
 ```bash
 cp kafka/.env.example kafka/.env
+cp identity-webhook/.env.example identity-webhook/.env
 cp remote-signer/.env.example remote-signer/.env
-$EDITOR remote-signer/.env
+$EDITOR identity-webhook/.env remote-signer/.env
+# WEBHOOK_SECRET must match in both files (`.env.example` ships a local dev value).
 # For a local alive check without an identity webhook:
 #   REMOTE_SIGNER_WEBHOOK_URL=
 #   WEBHOOK_SECRET=
 
-docker compose up -d --build kafka remote-signer
+docker compose up -d --build kafka identity-webhook remote-signer
 docker compose logs -f remote-signer
 ```
 
-Expected result: `remote-signer` starts cleanly, connects to Kafka, and serves the signing HTTP port.
-
-Smoketests:
+Verify the identity webhook (simulates go-livepeer calling `/authorize`; secret matches `.env.example`):
 
 ```bash
-docker compose ps
-# kafka "healthy" (signer only starts once Kafka is healthy), remote-signer "Up"
-
-curl -fsS -X POST http://localhost:8081/sign-orchestrator-info
-# {"address":"0x…","signature":"0x…"} — keystore unlocked, signer can sign
+docker compose exec identity-webhook \
+  curl -sS -X POST http://localhost:8090/authorize \
+    -H "Authorization: Bearer dev-webhook-secret-change-me" \
+    -H "Content-Type: application/json" \
+    -d '{"headers":{"Authorization":["Bearer sk_demo_local_key"]}}'
+# expected: "status":200, "auth_id":"demo-client:demo-user"
 ```
+
+Expected result: `remote-signer` starts cleanly, connects to Kafka, and serves the signing HTTP port.
 
 Verify CLI port is not published:
 
@@ -70,7 +72,7 @@ Verify CLI port is not published:
 docker compose port remote-signer 4935
 # expected: no output / error (port is not mapped)
 docker compose port remote-signer 8081
-# expected: 127.0.0.1:8081
+# expected: 0.0.0.0:8081
 ```
 
 ### 2. Full stack — add metering
@@ -86,28 +88,13 @@ docker compose logs -f
 docker compose down
 ```
 
-Smoketest — produce a signed-ticket event; the collector forwards it to OpenMeter/Konnect:
-
-```bash
-docker compose exec -T kafka rpk topic create livepeer-gateway-events
-# gateway topic (broker auto-create is off)
-
-echo '{"type":"create_signed_ticket","data":{"auth_id":"demo-client:demo-user","computed_fee":"1000000000000000","request_id":"clearinghouse-smoketest","pipeline":"live-video-to-video","pixels":"1000"}}' \
-  | docker compose exec -T kafka rpk topic produce livepeer-gateway-events
-# collector consumes it, converts the fee, POSTs to OpenMeter/Konnect
-
-docker compose logs --tail=20 openmeter-collector
-# no ERROR = forwarded to OpenMeter
-```
-
-Re-runs are dedup-safe (OpenMeter deduplicates by event id). A real signer-emitted event needs a full gateway or [local SDK](https://github.com/livepeer/livepeer-python-gateway) to call a real job with a funded signer — out of scope here.
-
 ## Environment variables
 
 Each service documents its variables in its own `.env.example`:
 
 | Service | Config file | Key variables |
 | --- | --- | --- |
+| `identity-webhook` | [`identity-webhook/.env.example`](identity-webhook/.env.example) | `WEBHOOK_SECRET`, `IDENTITY_ISSUER`, `DEMO_API_KEY`, `DEMO_CLIENT_ID`, `DEMO_USER_ID`, `API_KEY_PREFIX` (optional, default `sk_`) |
 | `kafka` | [`kafka/.env.example`](kafka/.env.example) | `KAFKA_ADVERTISED_ADDR` |
 | `remote-signer` | [`remote-signer/.env.example`](remote-signer/.env.example) | `REMOTE_SIGNER_WEBHOOK_URL`, `WEBHOOK_SECRET`, `SIGNER_*`, `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC` |
 | `openmeter-collector` | [`openmeter-collector/.env.example`](openmeter-collector/.env.example) | `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`, `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, `ETH_USD_PRICE` |
@@ -164,3 +151,5 @@ stays empty while the catalog is ready.
 
 The collector expects Kafka `auth_id` as `client_id:external_user_id` (first-colon split).
 Konnect customer key matches that compound id (e.g. `demo-client:demo-user`).
+
+Demo API key defaults: `sk_demo_local_key` → `demo-client:demo-user` (configured in `identity-webhook/.env`).
