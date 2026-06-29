@@ -1,0 +1,4 @@
+/auth0ctl
+/dist/
+.env
+.env.livepeer

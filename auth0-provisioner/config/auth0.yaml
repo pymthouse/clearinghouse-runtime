@@ -1,0 +1,54 @@
+# Declarative Auth0 tenant slice for the Livepeer clearinghouse.
+#
+# One tenant, one resource server (API), and N public/confidential client pairs
+# modeling pymthouse's OIDC issuer design. auth0ctl reconciles this idempotently
+# against the Auth0 Management API (re-running updates in place, never duplicates).
+
+# Tenant-wide settings. A default audience lets the RFC 8628 device authorization
+# endpoint mint API access tokens without an explicit audience parameter.
+tenant:
+  defaultAudience: livepeer-clearinghouse
+  defaultDirectory: Username-Password-Authentication
+  deviceFlow:
+    charset: base20
+    mask: "****-****"
+  enabledLocales: [en]
+
+# The API every client pair authenticates against. identifier == JWT audience.
+# Scopes are the full pymthouse set; each pair is granted a subset below.
+resourceServers:
+  - name: Livepeer Clearinghouse API
+    identifier: livepeer-clearinghouse
+    signingAlg: RS256
+    tokenLifetime: 86400
+    allowOfflineAccess: true            # refresh tokens for the device flow
+    skipConsentForVerifiableFirstPartyClients: true
+    scopes:
+      - { value: "sign:job",             description: "Sign payment tickets for the Livepeer remote signer" }
+      - { value: "sign:mint_user_token", description: "Mint short-lived user signer JWTs (M2M only)" }
+      - { value: "users:read",           description: "Read provisioned application users" }
+      - { value: "users:write",          description: "Create, update, and deactivate application users" }
+      - { value: "users:token",          description: "Issue per-user access tokens (enables per-user billing)" }
+      - { value: "device:approve",       description: "RFC 8693 token exchange to bind device codes (M2M only)" }
+      - { value: "admin",                description: "Administrative access to provider surfaces" }
+
+# Each app = a public (native, device flow, no secret) client paired with a
+# confidential (M2M, client_credentials) client. The public client's grantScopes
+# drive end-user token claims; the M2M client's gate server-side calls.
+apps:
+  - name: Demo App
+    audience: livepeer-clearinghouse
+    public:
+      grantScopes: ["sign:job"]
+      callbacks: []                       # optional auth_code redirect URIs
+      initiateLoginUri: ""                # optional Option-B third-party device initiate
+    m2m:
+      grantScopes: ["users:write", "users:token", "device:approve", "sign:job"]
+
+  - name: Per-User App
+    audience: livepeer-clearinghouse
+    public:
+      # users:token in the public grant marks this app per-user (per-user billing).
+      grantScopes: ["sign:job", "users:token"]
+    m2m:
+      grantScopes: ["users:write", "users:token", "device:approve", "sign:job", "sign:mint_user_token"]
