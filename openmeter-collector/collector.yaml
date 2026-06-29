@@ -100,7 +100,6 @@ pipeline:
               key: eth_usd
         result_map: |
           meta eth_usd_price = content().number()
-          root = @
 
     - mapping: |
         let data = this.data.or({})
