@@ -110,7 +110,7 @@ Each service documents its variables in its own `.env.example`:
 | --- | --- | --- |
 | `kafka` | [`kafka/.env.example`](kafka/.env.example) | `KAFKA_ADVERTISED_ADDR` |
 | `remote-signer` | [`remote-signer/.env.example`](remote-signer/.env.example) | `REMOTE_SIGNER_WEBHOOK_URL`, `WEBHOOK_SECRET`, `SIGNER_*`, `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC` |
-| `openmeter-collector` | [`openmeter-collector/.env.example`](openmeter-collector/.env.example) | `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`, `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, `ETH_USD_PRICE` |
+| `openmeter-collector` | [`openmeter-collector/.env.example`](openmeter-collector/.env.example) | `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`, `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, `PRICE_ORACLE_URL`, `PRICE_ORACLE_REFRESH` |
 
 Signer state (keystore, `.eth-password`, chain DB) is stored under [`remote-signer/data/`](remote-signer/data/), bind-mounted to `/data` in the container.
 
@@ -162,5 +162,11 @@ stays empty while the catalog is ready.
 
 ### Identity contract (collector)
 
-The collector expects Kafka `auth_id` as `client_id:external_user_id` (first-colon split).
-Konnect customer key matches that compound id (e.g. `demo-client:demo-user`).
+Upstream Kafka events carry `auth_id` as `client_id:usage_subject` (webhook → go-livepeer state → Kafka; unchanged).
+
+The collector parses `auth_id` once (first-colon split) and emits normalized CloudEvents to Konnect/OpenMeter:
+
+- `subject` = end user (`usage_subject`)
+- `data.client_id` = tenant
+- `data.usage_subject` = end user
+- `data.auth_id` retained for compatibility; `data.external_user_id` mirrors `usage_subject` for meter `groupBy`
