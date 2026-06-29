@@ -1,4 +1,4 @@
-module github.com/livepeer/clearinghouse/openmeter-collector/provision
+module github.com/livepeer/clearinghouse/tenant-admin
 
 go 1.25.10
 

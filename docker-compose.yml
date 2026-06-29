@@ -1,4 +1,4 @@
-# Clearinghouse stack: identity webhook + Redpanda + remote signer + OpenMeter collector.
+# Clearinghouse stack: identity webhook + Redpanda + remote signer + OpenMeter collector + tenant-admin.
 #
 # Redpanda is the Kafka-compatible broker. The signer container runs go-livepeer directly —
 # only its signing HTTP port (8081) is published to the host. The CLI/admin port (-cliAddr)
@@ -6,10 +6,16 @@
 #
 # Per-service config: copy each service's .env.example to .env before starting.
 #
+# tenant-admin owns customer provisioning. The identity webhook calls tenant-admin's
+# internal API (tenant-admin:8094) to ensure the OpenMeter customer exists BEFORE the
+# signer signs — so identity-webhook depends on tenant-admin. The ensure gate is
+# fail-closed by default; for signer-only experiments without a configured tenant-admin,
+# set ENSURE_FAIL_OPEN=true in identity-webhook/.env.
+#
 # Full stack:
 #   docker compose up -d --build
 #
-# Kafka + identity webhook + signer only (no metering):
+# Kafka + identity webhook + signer (tenant-admin pulled in as a dependency):
 #   docker compose up -d --build kafka identity-webhook remote-signer
 
 services:
@@ -22,6 +28,13 @@ services:
       - ./identity-webhook/.env
     environment:
       PORT: "8090"
+      # Ensure the OpenMeter customer exists before the signer is told to sign.
+      # Reaches tenant-admin's internal API over the private compose network.
+      TENANT_ADMIN_ENSURE_URL: http://tenant-admin:8094/internal/customers/ensure
+      TENANT_ADMIN_INTERNAL_SECRET: ${TENANT_ADMIN_INTERNAL_SECRET:-dev-internal-secret-change-me}
+    depends_on:
+      tenant-admin:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
       interval: 10s
@@ -71,6 +84,31 @@ services:
         condition: service_healthy
     volumes:
       - ./openmeter-collector/.env:/service/.env:ro
+
+  tenant-admin:
+    build:
+      context: .
+      dockerfile: tenant-admin/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./tenant-admin/.env
+    environment:
+      # Internal API binds the private compose network (reachable by identity-webhook as
+      # tenant-admin:8094) but is never published to the host. Guarded by INTERNAL_API_SECRET.
+      TENANT_ADMIN_INTERNAL_LISTEN_ADDR: ":8094"
+      INTERNAL_API_SECRET: ${TENANT_ADMIN_INTERNAL_SECRET:-dev-internal-secret-change-me}
+    # Admin API published to host loopback only (auth'd by ADMIN_SECRET).
+    # Port 8094 (internal API) is intentionally NOT published.
+    ports:
+      - "127.0.0.1:8093:8093"
+    volumes:
+      - ./tenant-admin/data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8093/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
 # Signer datadir is bind-mounted from remote-signer/data.
 # Copy keystore + .eth-password into remote-signer/data before first run.

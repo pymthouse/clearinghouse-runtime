@@ -4,6 +4,7 @@ import {
   routeRemoteSignerWebhookRequest,
 } from "@pymthouse/builder-sdk/signer/webhook";
 import { loadApiKeyStore } from "./keys.mjs";
+import { createEnsureCustomerHook } from "./ensure.mjs";
 
 const port = Number(process.env.PORT || 8090);
 
@@ -13,6 +14,21 @@ function required(name) {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+function numberEnv(name, fallback) {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function boolEnv(name) {
+  return ["1", "true", "yes", "on"].includes(
+    (process.env[name] ?? "").trim().toLowerCase(),
+  );
 }
 
 const keyStore = loadApiKeyStore(process.env);
@@ -37,6 +53,24 @@ const config = {
     },
   }),
 };
+
+// Proactively ensure the OpenMeter customer before the signer is told to sign.
+// Enabled by setting TENANT_ADMIN_ENSURE_URL (tenant-admin internal API).
+const ensureUrl = process.env.TENANT_ADMIN_ENSURE_URL?.trim();
+if (ensureUrl) {
+  config.afterVerify = createEnsureCustomerHook({
+    url: ensureUrl,
+    secret: process.env.TENANT_ADMIN_INTERNAL_SECRET,
+    ttlSeconds: numberEnv("ENSURE_CACHE_TTL_SECONDS", 600),
+    timeoutMs: numberEnv("ENSURE_TIMEOUT_MS", 5000),
+    failOpen: boolEnv("ENSURE_FAIL_OPEN"),
+  });
+  console.log(`identity-webhook: customer ensure gate enabled -> ${ensureUrl}`);
+} else {
+  console.warn(
+    "identity-webhook: TENANT_ADMIN_ENSURE_URL not set; customer ensure gate disabled",
+  );
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {

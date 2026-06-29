@@ -3,6 +3,8 @@ remote-signer/.env
 openmeter-collector/.env
 identity-webhook/.env
 remote-signer/data/
+tenant-admin/.env
+tenant-admin/data/
 node_modules/
 
 # Editor / OS

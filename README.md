@@ -146,34 +146,31 @@ Markup rules are defined in the bootstrap CLI catalog. Collector
 pipeline config: [`openmeter-collector/collector.yaml`](openmeter-collector/collector.yaml).
 `billable_usd_micros` is initially set equal to `network_fee_usd_micros`; markup rules will diverge in a later phase.
 
-### Customer upsert (collector self-heal)
+### Customer ensure (before service)
 
-The collector runs a local Go provision sidecar (`openmeter-collector/provision`, Kong `sdk-konnect-go`) that holds the
-OpenMeter admin credentials — the identity webhook does **not** need them.
+Customer creation is a **control-plane** responsibility owned by
+[`tenant-admin`](tenant-admin/), not a data-path side effect. The customer is ensured
+**before** the signer signs, so usage is never ingested for an unknown customer:
 
-For each `create_signed_ticket` event:
+1. The remote signer calls the identity webhook to authorize an end-user.
+2. After verifying the identity, the webhook synchronously calls tenant-admin's internal
+   API — `POST http://tenant-admin:8094/internal/customers/ensure` with
+   `{ clientId, externalUserId }` — which idempotently ensures the OpenMeter customer +
+   subscription. Successful ensures are cached in-webhook (TTL), and the gate is
+   fail-closed by default (`ENSURE_FAIL_OPEN=true` to relax).
+3. The webhook returns the `auth_id`; the signer signs and emits a `create_signed_ticket`.
+4. The collector maps the CloudEvent and ingests it to Konnect — **ingest only**, no
+   customer creation on the data path.
 
-1. Benthos maps the CloudEvent (including `billable_usd_micros`, initially equal to `network_fee_usd_micros`).
-2. `POST http://127.0.0.1:8091/ensure` idempotently creates customer + subscription (`OPENMETER_DEFAULT_PLAN_KEY`).
-3. Event is ingested to Konnect.
-4. On ingest failure (e.g. `no customer found for event subject`), the collector ensures again and retries once.
+tenant-admin holds the OpenMeter provisioner credential (`OPENMETER_PROVISIONER_PAT`); the
+identity webhook and collector never need OpenMeter admin credentials.
 
-### Future admin/query boundary (OAuth later)
+### Identity contract
 
-When an admin/query API is added, introduce a small internal **billing-gateway** service:
+`auth_id` is `client_id:external_user_id` (first-colon split) — the builder-sdk format.
+The OpenMeter customer key and the CloudEvent `subject` are the same string, so usage
+attributes to the customer (e.g. `demo-client:demo-user`).
 
-- Move ensure-customer and usage-query logic behind that gateway.
-- Protect caller-to-gateway with OAuth (client credentials / service-to-service).
-- Keep gateway-to-OpenMeter on backend machine credentials (`kpat_…`).
-
-The collector provision sidecar is the thin local equivalent until that gateway exists.
-
-### Identity contract (collector)
-
-The collector expects Kafka `auth_id` as `client_id:external_user_id` (first-colon split).
-Konnect customer key matches that compound id (e.g. `demo-client:demo-user`).
-
-Demo API key defaults: `sk_demo_local_key` → `demo-client:demo-user` (configured in `identity-webhook/.env`).
-
-Customer upsert is handled by the collector provision sidecar (see above). The Go bootstrap CLI
-still provisions meters/features/plans; per-event customer+subscription ensure runs in the collector.
+Demo API key defaults: `sk_demo_local_key` → `demo-client:demo-user` (configured in
+`identity-webhook/.env`). The Go bootstrap CLI still provisions meters/features/plans;
+per-customer ensure runs in tenant-admin, triggered by the identity webhook.
