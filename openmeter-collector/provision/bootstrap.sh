@@ -36,9 +36,22 @@ command -v kongctl >/dev/null 2>&1 || die "kongctl not found (https://developer.
 command -v jq >/dev/null 2>&1 || die "jq not found"
 [ -f "$CATALOG" ] || die "catalog not found: $CATALOG"
 
+# --- env file (openmeter-collector/.env) -----------------------------------
+# Plain `source .env` does not export vars to child processes; load here so
+# `./bootstrap.sh catalog` works without `set -a; source …`.
+ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/../.env}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
 # --- auth + endpoint -------------------------------------------------------
 PAT="${KONGCTL_DEFAULT_KONNECT_PAT:-${OPENMETER_API_KEY:-}}"
-[ -n "$PAT" ] || die "set KONGCTL_DEFAULT_KONNECT_PAT or OPENMETER_API_KEY (a Konnect PAT)"
+if [ -z "$PAT" ]; then
+  die "no Konnect PAT — set KONGCTL_DEFAULT_KONNECT_PAT or OPENMETER_API_KEY in the environment or in $ENV_FILE"
+fi
 export KONGCTL_DEFAULT_KONNECT_PAT="$PAT"
 
 OPENMETER_URL="${OPENMETER_URL:-https://us.api.konghq.com/v3/openmeter}"
@@ -48,12 +61,26 @@ PREFIX="$(printf '%s' "$OPENMETER_URL" | sed -E 's#https?://[^/]+##')"
 [ -n "$PREFIX" ] || PREFIX="/v3/openmeter"
 
 # --- kongctl api helpers (return response body as JSON on stdout) ----------
-kapi_get()  { kongctl api get    "$PREFIX$1" --base-url "$BASE" -o json; }
-kapi_post() { kongctl api post   "$PREFIX$1" --base-url "$BASE" -o json -f -; }
-kapi_put()  { kongctl api put    "$PREFIX$1" --base-url "$BASE" -o json -f -; }
+kapi_get()    { kongctl api get    "$PREFIX$1" --base-url "$BASE" -o json; }
+kapi_post()   { kongctl api post   "$PREFIX$1" --base-url "$BASE" -o json -f -; }
+kapi_put()    { kongctl api put    "$PREFIX$1" --base-url "$BASE" -o json -f -; }
+kapi_delete() { kongctl api delete "$PREFIX$1" --base-url "$BASE" -o json; }
 
-# Unwrap list responses: collections come back as {"data":[...]}, items bare.
-list_items() { jq -c '(.data // .)'; }
+plan_config_key() { jq -r '.plan.key // .plan_key // empty' "$CATALOG"; }
+
+meter_id_for() {
+  kapi_get /meters | jq -r --arg k "$1" '(.data // .)[] | select(.key == $k) | .id'
+}
+
+feature_for() {
+  kapi_get /features | jq -c --arg k "$1" '(.data // .)[] | select(.key == $k)'
+}
+
+find_plan_by_status() {
+  local plan_key="$1" status="$2"
+  kapi_get "/plans?filter[key]=${plan_key}&filter[status]=${status}" \
+    | jq -c --arg k "$plan_key" '(.data // .)[] | select(.key == $k)' | head -n 1
+}
 
 # --- catalog ---------------------------------------------------------------
 ensure_meters() {
@@ -75,36 +102,132 @@ ensure_meters() {
   done < <(jq -c '.meters[]' "$CATALOG")
 }
 
+feature_meter_key() { jq -r '.meter_key // .meter_slug // empty' <<<"$1"; }
+
+create_feature() {
+  local key="$1" name="$2" meter_id="$3"
+  local body
+  body="$(jq -n --arg key "$key" --arg name "$name" --arg mid "$meter_id" \
+    '{key:$key, name:$name, meter:{id:$mid}}')"
+  printf '%s' "$body" | kapi_post /features >/dev/null
+}
+
 ensure_features() {
-  local existing
-  existing="$(kapi_get /features | jq -r '(.data // .)[].key')"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    local key; key="$(jq -r '.key' <<<"$f")"
-    if printf '%s\n' "$existing" | grep -qxF "$key"; then
+    local key meter_key meter_id feat_rec feat_id linked_meter body
+    key="$(jq -r '.key' <<<"$f")"
+    meter_key="$(feature_meter_key "$f")"
+    [ -n "$meter_key" ] || die "feature $key requires meter_key in catalog.json"
+    meter_id="$(meter_id_for "$meter_key")"
+    [ -n "$meter_id" ] || die "meter $meter_key not found for feature $key"
+
+    feat_rec="$(feature_for "$key")"
+    if [ -z "$feat_rec" ]; then
+      create_feature "$key" "$(jq -r '.name' <<<"$f")" "$meter_id"
+      info "feature $key — created"
+      continue
+    fi
+
+    feat_id="$(jq -r '.id' <<<"$feat_rec")"
+    linked_meter="$(jq -r '.meter.id // empty' <<<"$feat_rec")"
+    if [ "$linked_meter" = "$meter_id" ]; then
       info "feature $key — exists"
       continue
     fi
-    printf '%s' "$(jq '{key, name, meter_slug}' <<<"$f")" | kapi_post /features >/dev/null
-    info "feature $key — created"
+
+    warn "feature $key — exists without meter link; recreating"
+    kapi_delete "/features/$feat_id" >/dev/null 2>&1 || true
+    create_feature "$key" "$(jq -r '.name' <<<"$f")" "$meter_id"
+    info "feature $key — recreated (meter: $meter_key)"
   done < <(jq -c '.features[]' "$CATALOG")
 }
 
-verify_plan() {
-  local plan_key; plan_key="$(jq -r '.plan_key // empty' "$CATALOG")"
-  [ -n "$plan_key" ] || { info "plan    — none configured"; return 0; }
-  if kapi_get /plans | jq -e --arg k "$plan_key" '(.data // .)[]? | select(.key == $k)' >/dev/null; then
-    info "plan    $plan_key — present"
-  else
-    warn "plan    $plan_key — NOT found; create it in Konnect before subscribing customers"
+build_plan_body() {
+  local feat_map
+  feat_map="$(kapi_get /features | jq '[(.data // .)[] | {(.key): .id}] | add')"
+  jq --argjson feats "$feat_map" '
+    .plan as $p
+    | {
+        key: $p.key,
+        name: $p.name,
+        description: ($p.description // empty),
+        currency: $p.currency,
+        billing_cadence: $p.billing_cadence,
+        phases: [
+          $p.phases[]
+          | {
+              key,
+              name,
+              rate_cards: [
+                .rate_cards[]
+                | {
+                    key,
+                    name,
+                    feature: { id: $feats[.feature_key] },
+                    billing_cadence,
+                    price
+                  }
+              ]
+            }
+        ]
+      }
+    | if .description == "" then del(.description) else . end
+  ' "$CATALOG"
+}
+
+publish_plan() {
+  local plan_id="$1" plan_key="$2"
+  if printf '{}' | kapi_post "/plans/$plan_id/publish" 2>/dev/null \
+    | jq -e '.status == "active"' >/dev/null; then
+    info "plan    $plan_key — published"
+    return 0
   fi
+  warn "plan    $plan_key — could not publish (ensure features have meter links)"
+  return 1
+}
+
+ensure_plan() {
+  local plan_key
+  plan_key="$(plan_config_key)"
+  [ -n "$plan_key" ] || { info "plan    — none configured"; return 0; }
+  jq -e '.plan' "$CATALOG" >/dev/null 2>&1 \
+    || die "catalog plan block missing — add .plan or remove plan_key"
+
+  if [ -n "$(find_plan_by_status "$plan_key" active)" ]; then
+    info "plan    $plan_key — active"
+    return 0
+  fi
+
+  local draft draft_id body plan_id
+  draft="$(find_plan_by_status "$plan_key" draft)"
+  if [ -n "$draft" ]; then
+    draft_id="$(jq -r '.id' <<<"$draft")"
+    info "plan    $plan_key — draft exists, publishing"
+    publish_plan "$draft_id" "$plan_key" || true
+    return 0
+  fi
+
+  body="$(build_plan_body)"
+  if printf '%s' "$body" | jq -e '[
+    .phases[].rate_cards[].feature.id
+    | select(. == null or . == "")
+  ] | length == 0' >/dev/null; then
+    :
+  else
+    die "plan rate cards reference unknown features — run ensure_features first"
+  fi
+
+  plan_id="$(printf '%s' "$body" | kapi_post /plans | jq -r '.id')"
+  info "plan    $plan_key — created (draft)"
+  publish_plan "$plan_id" "$plan_key" || true
 }
 
 cmd_catalog() {
   info "== catalog ($BASE$PREFIX) =="
   ensure_meters
   ensure_features
-  verify_plan
+  ensure_plan
 }
 
 # --- customer --------------------------------------------------------------
@@ -148,7 +271,7 @@ ensure_customer() {
 # Best-effort subscription on the catalog plan. Skips if the customer already has one.
 ensure_subscription() {
   local customer_id="$1" label="$2"
-  local plan_key; plan_key="$(jq -r '.plan_key // empty' "$CATALOG")"
+  local plan_key; plan_key="$(plan_config_key)"
   [ -n "$plan_key" ] || { warn "no plan_key in catalog; skipping subscription"; return 0; }
 
   local existing

@@ -49,13 +49,37 @@
     {
       "key": "network_spend",
       "name": "Network spend",
-      "meter_slug": "network_fee_usd_micros"
+      "meter_key": "network_fee_usd_micros"
     },
     {
       "key": "billable_spend",
       "name": "Billable spend",
-      "meter_slug": "billable_usd_micros"
+      "meter_key": "billable_usd_micros"
     }
   ],
-  "plan_key": "clearinghouse_default_ppu"
+  "plan": {
+    "key": "clearinghouse_default_ppu",
+    "name": "Clearinghouse default pay-per-use",
+    "description": "Default pay-per-use plan billed on billable_usd_micros usage (1 USD micro = $0.000001).",
+    "currency": "USD",
+    "billing_cadence": "P1M",
+    "phases": [
+      {
+        "key": "default",
+        "name": "Default",
+        "rate_cards": [
+          {
+            "key": "billable_spend",
+            "name": "Billable spend",
+            "feature_key": "billable_spend",
+            "billing_cadence": "P1M",
+            "price": {
+              "type": "unit",
+              "amount": "0.000001"
+            }
+          }
+        ]
+      }
+    ]
+  }
 }
