@@ -65,7 +65,7 @@ input:
             - label: price_refresh
               generate:
                 count: 0
-                interval: ${PRICE_ORACLE_REFRESH:-5m}
+                interval: ${PRICE_ORACLE_REFRESH:5m}
                 mapping: 'root = {}'
               processors:
                 - try:
