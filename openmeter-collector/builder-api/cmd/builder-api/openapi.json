@@ -1,0 +1,169 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Clearinghouse Builder API",
+    "version": "1.0.0",
+    "description": "Machine-facing Builder API for clearinghouse integrators. Provisions Auth0 end-users, OpenMeter customers, and mints short-lived signer JWTs."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8095",
+      "description": "Local builder-api (openmeter-collector container)"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness probe",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/apps/{clientId}/users": {
+      "post": {
+        "summary": "Create or upsert an end-user",
+        "description": "Creates an Auth0 Database user, upserts the OpenMeter customer, and optionally issues an end-user API key.",
+        "security": [{ "m2mBasic": [] }],
+        "parameters": [
+          {
+            "name": "clientId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Public Auth0 client id for the integrator app"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateUserRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateUserResponse" }
+              }
+            }
+          },
+          "200": {
+            "description": "User updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateUserResponse" }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/apps/{clientId}/auth/api-key/signer-session": {
+      "post": {
+        "summary": "Exchange API key for signer session",
+        "description": "Validates an end-user API key, upserts the OpenMeter customer, and mints a short-lived signer JWT via Auth0.",
+        "security": [{ "bearerApiKey": [] }],
+        "parameters": [
+          {
+            "name": "clientId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SignerSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signer session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SignerSession" }
+              }
+            }
+          },
+          "400": { "description": "Invalid request" },
+          "401": { "description": "Invalid API key" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "m2mBasic": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "M2M client id and secret (users:write)"
+      },
+      "bearerApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "End-user API key (sk_…)"
+      }
+    },
+    "schemas": {
+      "CreateUserRequest": {
+        "type": "object",
+        "required": ["externalUserId"],
+        "properties": {
+          "externalUserId": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "connection": { "type": "string" },
+          "issueApiKey": { "type": "boolean", "default": true }
+        }
+      },
+      "CreateUserResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "clientId": { "type": "string" },
+          "externalUserId": { "type": "string" },
+          "email": { "type": "string" },
+          "status": { "type": "string" },
+          "apiKey": { "type": "string", "description": "Returned once when issueApiKey is true" }
+        }
+      },
+      "SignerSessionRequest": {
+        "type": "object",
+        "properties": {
+          "scope": { "type": "string", "description": "Defaults to sign:job" }
+        }
+      },
+      "SignerSession": {
+        "type": "object",
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in",
+          "scope",
+          "balanceUsdMicros",
+          "lifetimeGrantedUsdMicros"
+        ],
+        "properties": {
+          "access_token": { "type": "string" },
+          "token_type": { "type": "string", "enum": ["Bearer"] },
+          "expires_in": { "type": "integer" },
+          "scope": { "type": "string" },
+          "balanceUsdMicros": { "type": "string" },
+          "lifetimeGrantedUsdMicros": { "type": "string" },
+          "signer_url": { "type": "string", "format": "uri" },
+          "issued_token_type": { "type": "string" },
+          "correlation_id": { "type": "string" }
+        }
+      }
+    }
+  }
+}

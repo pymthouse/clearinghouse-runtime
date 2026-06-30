@@ -1,0 +1,66 @@
+package main
+
+import (
+	"context"
+	_ "embed"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/apikey"
+	auth0mgmt "github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mgmt"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/httpapi"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
+)
+
+//go:embed openapi.json
+var openAPISpec []byte
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+
+	auth0Client, err := auth0mgmt.New(cfg.Auth0Domain, cfg.MgmtClientID, cfg.MgmtClientSecret, cfg.DBConnection)
+	if err != nil {
+		log.Fatalf("auth0: %v", err)
+	}
+
+	minter := auth0mint.New(cfg.Auth0Issuer, cfg.Auth0Audience, cfg.SignerM2MClientID, cfg.SignerM2MSecret)
+	omClient := openmeter.New(cfg.OpenMeterURL, cfg.OpenMeterAPIKey)
+
+	demoKeys, err := apikey.LoadDemoStore(cfg.DemoAPIKeys)
+	if err != nil {
+		log.Fatalf("demo api keys: %v", err)
+	}
+
+	srv := httpapi.NewServer(cfg, auth0Client, minter, omClient, demoKeys, openAPISpec)
+	server := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	go func() {
+		log.Printf("builder-api listening on :%s", cfg.Port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+}
