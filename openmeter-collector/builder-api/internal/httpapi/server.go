@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,29 +9,29 @@ import (
 	auth0mgmt "github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mgmt"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
-	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/enduser"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/tokenexchange"
 )
 
 // Server wires Builder API routes and dependencies.
 type Server struct {
-	cfg         config.Config
-	auth0       *auth0mgmt.Client
-	minter      *auth0mint.Minter
-	openmeter   *openmeter.Client
-	enduser     *enduser.Resolver
-	openAPISpec []byte
+	cfg           config.Config
+	auth0         *auth0mgmt.Client
+	minter        *auth0mint.Minter
+	openmeter     *openmeter.Client
+	tokenExchange *tokenexchange.Handler
+	openAPISpec   []byte
 }
 
 // NewServer constructs the HTTP API server.
-func NewServer(cfg config.Config, auth0 *auth0mgmt.Client, minter *auth0mint.Minter, om *openmeter.Client, resolver *enduser.Resolver, openAPISpec []byte) *Server {
+func NewServer(cfg config.Config, auth0 *auth0mgmt.Client, minter *auth0mint.Minter, om *openmeter.Client, tokenExchange *tokenexchange.Handler, openAPISpec []byte) *Server {
 	return &Server{
-		cfg:         cfg,
-		auth0:       auth0,
-		minter:      minter,
-		openmeter:   om,
-		enduser:     resolver,
-		openAPISpec: openAPISpec,
+		cfg:           cfg,
+		auth0:         auth0,
+		minter:        minter,
+		openmeter:     om,
+		tokenExchange: tokenExchange,
+		openAPISpec:   openAPISpec,
 	}
 }
 
@@ -42,7 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /api/v1/docs", s.handleDocs)
 	mux.HandleFunc("POST /api/v1/apps/{clientId}/users", s.handleCreateUser)
-	mux.HandleFunc("POST /api/v1/apps/{clientId}/auth/signer-session", s.handleSignerSession)
+	mux.HandleFunc("POST /api/v1/apps/{clientId}/oidc/token", s.handleOIDCToken)
 	return mux
 }
 
@@ -142,102 +141,6 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Status:         "active",
 		APIKey:         user.APIKey,
 	})
-}
-
-type signerSessionRequest struct {
-	Scope string `json:"scope"`
-}
-
-type signerSessionResponse struct {
-	AccessToken              string `json:"access_token"`
-	TokenType                string `json:"token_type"`
-	ExpiresIn                int    `json:"expires_in"`
-	Scope                    string `json:"scope"`
-	BalanceUsdMicros         string `json:"balanceUsdMicros"`
-	LifetimeGrantedUsdMicros string `json:"lifetimeGrantedUsdMicros"`
-	SignerURL                string `json:"signer_url,omitempty"`
-	DiscoveryURL             string `json:"discovery_url,omitempty"`
-	IssuedTokenType          string `json:"issued_token_type,omitempty"`
-	CorrelationID            string `json:"correlation_id,omitempty"`
-}
-
-func (s *Server) handleSignerSession(w http.ResponseWriter, r *http.Request) {
-	correlationID := newCorrelationID()
-	clientID := strings.TrimSpace(r.PathValue("clientId"))
-	if clientID == "" {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "clientId is required", correlationID)
-		return
-	}
-
-	token := BearerToken(r)
-	if token == "" {
-		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "missing bearer token", correlationID)
-		return
-	}
-
-	var req signerSessionRequest
-	if r.ContentLength > 0 {
-		parsed, err := readJSONBody[signerSessionRequest](r)
-		if err != nil {
-			writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error(), correlationID)
-			return
-		}
-		req = parsed
-	}
-	scope := strings.TrimSpace(req.Scope)
-	if scope == "" {
-		scope = "sign:job"
-	}
-
-	ctx := r.Context()
-	identity, err := s.enduser.ResolveBearer(ctx, token, clientID)
-	if err != nil {
-		writeOAuthError(
-			w,
-			enduser.OAuthHTTPStatus(err),
-			enduser.OAuthErrorCode(err),
-			enduser.OAuthErrorDescription(err),
-			correlationID,
-		)
-		return
-	}
-
-	if _, err := s.openmeter.EnsureCustomer(ctx, identity.ClientID, identity.ExternalUserID, identity.ExternalUserID); err != nil {
-		writeOAuthError(w, http.StatusBadGateway, "server_error", "openmeter customer provisioning failed", correlationID)
-		return
-	}
-
-	s.writeSignerSession(w, ctx, identity.ClientID, identity.ExternalUserID, scope, correlationID)
-}
-
-func (s *Server) writeSignerSession(
-	w http.ResponseWriter,
-	ctx context.Context,
-	clientID, externalUserID, scope, correlationID string,
-) {
-	minted, err := s.minter.MintSignerToken(ctx, clientID, externalUserID)
-	if err != nil {
-		writeOAuthError(w, http.StatusBadGateway, "server_error", "signer token mint failed", correlationID)
-		return
-	}
-
-	resp := signerSessionResponse{
-		AccessToken:              minted.AccessToken,
-		TokenType:                "Bearer",
-		ExpiresIn:                minted.ExpiresIn,
-		Scope:                    scope,
-		BalanceUsdMicros:         "0",
-		LifetimeGrantedUsdMicros: "0",
-		IssuedTokenType:          "urn:ietf:params:oauth:token-type:access_token",
-		CorrelationID:            correlationID,
-	}
-	if s.cfg.SignerURL != "" {
-		resp.SignerURL = s.cfg.SignerURL
-	}
-	if s.cfg.DiscoveryURL != "" {
-		resp.DiscoveryURL = s.cfg.DiscoveryURL
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 func readJSONBody[T any](r *http.Request) (T, error) {

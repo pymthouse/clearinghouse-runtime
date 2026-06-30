@@ -10,7 +10,7 @@ Docker Compose stack for the clearinghouse runtime:
 | **identity-webhook** (`identity-webhook`) | Resolves end-user credentials (API keys and/or Auth0 OIDC JWTs) to `auth_id` for go-livepeer's `/authorize` hook. Self-contained wire protocol + [`jose`](https://github.com/panva/jose) JWKS verification. | [jose](https://github.com/panva/jose) |
 | **Redpanda** (`kafka`) | Kafka-compatible event bus. The signer publishes gateway events; the collector consumes them. | [Redpanda docs](https://docs.redpanda.com/) |
 | **go-livepeer remote signer** (`remote-signer`) | Signs Livepeer payment tickets and emits `create_signed_ticket` events to Kafka. | [go-livepeer](https://github.com/livepeer/go-livepeer) |
-| **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. Also hosts the **Builder API** (Go, port 8095) for Auth0 user provisioning, signer-session mint, and OpenMeter customer upsert. | [OpenMeter collector](https://openmeter.io/docs/collectors), [builder-api/README](openmeter-collector/builder-api/README.md) |
+| **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. Also hosts the **Builder API** (Go, port 8095) for Auth0 user provisioning, RFC 8693 signer token exchange, and OpenMeter customer upsert. | [OpenMeter collector](https://openmeter.io/docs/collectors), [builder-api/README](openmeter-collector/builder-api/README.md) |
 | **Konnect / OpenMeter** (external) | Hosted metering and billing API. Set `OPENMETER_INGEST_URL` to your ingest endpoint. | [Konnect OpenMeter](https://docs.konghq.com/konnect/openmeter/), [self-hosted OpenMeter](https://openmeter.io/docs/deploy/kubernetes) |
 
 Data flow:
@@ -27,7 +27,7 @@ Signer HTTP request
 
 **Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
 
-**Identity & auth.** The in-compose **identity-webhook** implements go-livepeer's remote-signer webhook wire protocol in-repo (`identity-webhook/protocol.mjs`, `identity-webhook/verifiers.mjs`). It accepts **`Authorization: Bearer sk_…`** (API keys) and **`Authorization: Bearer <jwt>`** (Auth0 OIDC tokens from the Builder API signer-session exchange). Set `OIDC_ISSUER` / `OIDC_AUDIENCE` in `identity-webhook/.env` to verify JWTs; when both OIDC and API keys are configured, JWTs are tried first. The signer calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`; end-user credentials resolve to `auth_id = "{client_id}:{usage_subject}"`. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
+**Identity & auth.** The in-compose **identity-webhook** implements go-livepeer's remote-signer webhook wire protocol in-repo (`identity-webhook/protocol.mjs`, `identity-webhook/verifiers.mjs`). It accepts **`Authorization: Bearer sk_…`** (API keys) and **`Authorization: Bearer <jwt>`** (Auth0 OIDC tokens from the Builder API RFC 8693 token exchange). Set `OIDC_ISSUER` / `OIDC_AUDIENCE` in `identity-webhook/.env` to verify JWTs; when both OIDC and API keys are configured, JWTs are tried first. The signer calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`; end-user credentials resolve to `auth_id = "{client_id}:{usage_subject}"`. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host. Only the signing HTTP port (`8081`) is exposed.
 
@@ -174,9 +174,12 @@ curl -sS -u "$AUTH0_SIGNER_M2M_CLIENT_ID:$AUTH0_SIGNER_M2M_CLIENT_SECRET" \
   -d '{"externalUserId":"demo-user","email":"demo@example.com"}' \
   "http://localhost:8095/api/v1/apps/$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID/users"
 
-# Signer session (Bearer api key from response)
-curl -sS -H "Authorization: Bearer sk_..." \
-  -H "Content-Type: application/json" \
-  -d '{"scope":"sign:job"}' \
-  "http://localhost:8095/api/v1/apps/$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID/auth/signer-session"
+# Signer session (RFC 8693 token exchange)
+curl -sS \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+  --data-urlencode "subject_token=sk_..." \
+  --data-urlencode "subject_token_type=urn:ietf:params:oauth:token-type:access_token" \
+  --data-urlencode "audience=livepeer-clearinghouse" \
+  "http://localhost:8095/api/v1/apps/$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID/oidc/token"
 ```

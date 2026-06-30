@@ -14,10 +14,10 @@ import (
 	auth0mgmt "github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mgmt"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
-	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/enduser"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/httpapi"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/oidcverify"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/tokenexchange"
 )
 
 //go:embed openapi.json
@@ -55,13 +55,9 @@ func main() {
 		Demo:   demoKeys,
 		Auth0:  auth0Client,
 	}
-	resolver := &enduser.Resolver{
-		OIDC:    oidcVerifier,
-		APIKeys: keyStore,
-		Prefix:  cfg.APIKeyPrefix,
-	}
+	tokenHandler := tokenexchange.NewHandler(cfg, oidcVerifier, keyStore, minter, omClient)
 
-	srv := httpapi.NewServer(cfg, auth0Client, minter, omClient, resolver, openAPISpec)
+	srv := httpapi.NewServer(cfg, auth0Client, minter, omClient, tokenHandler, openAPISpec)
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           srv.Handler(),
