@@ -179,7 +179,13 @@ To change the host signing port or bind on all interfaces, use a Compose overrid
 ## OpenMeter/Konnect bootstrap
 
 Provision meters, features, and the default pay-per-use plan before starting the collector.
-Use the Go `clearinghouse-bootstrap` CLI or your existing Konnect setup.
+Use the [`kongctl` bootstrap scripts](openmeter-collector/provision/README.md) or your existing Konnect setup.
+
+```bash
+cd openmeter-collector/provision
+./bootstrap.sh catalog
+./bootstrap.sh customer demo-client demo-user "Demo User"
+```
 
 Creates:
 
