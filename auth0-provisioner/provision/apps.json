@@ -23,8 +23,12 @@
         "initiate_login_uri": ""
       },
       "m2m": {
-        "grant_scopes": ["users:write", "users:token", "device:approve", "sign:job"]
+        "grant_scopes": ["users:write", "users:token", "device:approve", "sign:job", "sign:mint_user_token"]
       }
     }
-  ]
+  ],
+  "managementClient": {
+    "name": "Clearinghouse Builder Management",
+    "grant_scopes": ["create:users", "read:users", "update:users"]
+  }
 }

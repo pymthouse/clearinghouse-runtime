@@ -1,0 +1,96 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// Config holds runtime configuration for the Builder API.
+type Config struct {
+	Port              string
+	Auth0Domain       string
+	Auth0Issuer       string
+	Auth0Audience     string
+	MgmtClientID      string
+	MgmtClientSecret  string
+	SignerM2MClientID string
+	SignerM2MSecret   string
+	DBConnection      string
+	OpenMeterURL      string
+	OpenMeterAPIKey   string
+	SignerURL         string
+	APIKeyPrefix      string
+	DemoAPIKeys       string
+}
+
+// Load reads configuration from environment variables.
+func Load() (Config, error) {
+	cfg := Config{
+		Port:              envOr("BUILDER_API_PORT", "8095"),
+		Auth0Domain:       firstEnv("AUTH0_DOMAIN"),
+		Auth0Issuer:       firstEnv("AUTH0_ISSUER"),
+		Auth0Audience:     envOr(firstEnv("AUTH0_AUDIENCE", "DEMO_APP_AUTH0_AUDIENCE"), "livepeer-clearinghouse"),
+		MgmtClientID:      firstEnv("AUTH0_MGMT_CLIENT_ID"),
+		MgmtClientSecret:  firstEnv("AUTH0_MGMT_CLIENT_SECRET"),
+		SignerM2MClientID: firstEnv("AUTH0_SIGNER_M2M_CLIENT_ID", "DEMO_APP_AUTH0_M2M_CLIENT_ID"),
+		SignerM2MSecret:   firstEnv("AUTH0_SIGNER_M2M_CLIENT_SECRET", "DEMO_APP_AUTH0_M2M_CLIENT_SECRET"),
+		DBConnection:      envOr("AUTH0_DB_CONNECTION", "Username-Password-Authentication"),
+		OpenMeterURL:      envOr("OPENMETER_URL", "https://us.api.konghq.com/v3/openmeter"),
+		OpenMeterAPIKey:   strings.TrimSpace(os.Getenv("OPENMETER_API_KEY")),
+		SignerURL:         strings.TrimSpace(os.Getenv("SIGNER_URL")),
+		APIKeyPrefix:      envOr("API_KEY_PREFIX", "sk_"),
+		DemoAPIKeys:       strings.TrimSpace(os.Getenv("DEMO_API_KEYS")),
+	}
+
+	if cfg.Auth0Issuer == "" && cfg.Auth0Domain != "" {
+		cfg.Auth0Issuer = "https://" + strings.TrimSuffix(cfg.Auth0Domain, "/") + "/"
+	}
+	cfg.Auth0Issuer = strings.TrimSuffix(cfg.Auth0Issuer, "/")
+
+	missing := make([]string, 0)
+	if cfg.Auth0Domain == "" {
+		missing = append(missing, "AUTH0_DOMAIN")
+	}
+	if cfg.MgmtClientID == "" {
+		missing = append(missing, "AUTH0_MGMT_CLIENT_ID")
+	}
+	if cfg.MgmtClientSecret == "" {
+		missing = append(missing, "AUTH0_MGMT_CLIENT_SECRET")
+	}
+	if cfg.SignerM2MClientID == "" {
+		missing = append(missing, "AUTH0_SIGNER_M2M_CLIENT_ID")
+	}
+	if cfg.SignerM2MSecret == "" {
+		missing = append(missing, "AUTH0_SIGNER_M2M_CLIENT_SECRET")
+	}
+	if cfg.OpenMeterAPIKey == "" {
+		missing = append(missing, "OPENMETER_API_KEY")
+	}
+	if len(missing) > 0 {
+		return cfg, fmt.Errorf("missing required env: %s", strings.Join(missing, ", "))
+	}
+
+	if _, err := strconv.Atoi(cfg.Port); err != nil {
+		return cfg, fmt.Errorf("BUILDER_API_PORT must be numeric: %w", err)
+	}
+
+	return cfg, nil
+}
+
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
