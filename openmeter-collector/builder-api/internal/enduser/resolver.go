@@ -40,8 +40,8 @@ type Resolver struct {
 	Prefix  string
 }
 
-// ResolveBearer mirrors identity-webhook createFirstMatchVerifier: JWT when shaped like
-// a JWT, otherwise sk_* API keys. JWT-shaped tokens never fall through to API key lookup.
+// ResolveBearer accepts a subject token for RFC 8693 exchange: JWT-shaped tokens
+// are verified via OIDC; otherwise sk_* API keys are resolved from the key store.
 func (r *Resolver) ResolveBearer(ctx context.Context, bearer, pathClientID string) (Identity, error) {
 	bearer = strings.TrimSpace(bearer)
 	if bearer == "" {
