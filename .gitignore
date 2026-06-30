@@ -5,3 +5,4 @@ node_modules/
 # Editor / OS
 .vscode/
 .DS_Store
+auth0-provisioner/provision/.env.livepeer
