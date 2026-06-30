@@ -268,28 +268,43 @@ ensure_customer() {
   [ "$subscribe" = "1" ] && ensure_subscription "$id" "$compound" || true
 }
 
+# Return subscription id for customer_id, if any (lists and exact-matches locally).
+subscription_for_customer() {
+  local customer_id="$1"
+  kapi_get /subscriptions 2>/dev/null \
+    | jq -r --arg c "$customer_id" '(.data // .)[]? | select(.customer_id == $c) | .id' 2>/dev/null \
+    | head -n 1
+}
+
 # Best-effort subscription on the catalog plan. Skips if the customer already has one.
 ensure_subscription() {
-  local customer_id="$1" label="$2"
+  local customer_id="$1" customer_key="$2"
   local plan_key; plan_key="$(plan_config_key)"
   [ -n "$plan_key" ] || { warn "no plan_key in catalog; skipping subscription"; return 0; }
 
-  local existing
-  existing="$(kapi_get "/subscriptions?customer_id=$customer_id" 2>/dev/null \
-    | jq -r --arg c "$customer_id" '(.data // .)[]? | select(.customer_id == $c) | .id' 2>/dev/null || true)"
-  if [ -n "$existing" ]; then
-    info "sub      $label — exists"
+  if [ -n "$(subscription_for_customer "$customer_id")" ]; then
+    info "sub      $customer_key — exists"
     return 0
   fi
-  local now body
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  body="$(jq -n --arg c "$customer_id" --arg p "$plan_key" --arg t "$now" \
-    '{customer_id:$c, plan_key:$p, active_from:$t}')"
-  if printf '%s' "$body" | kapi_post /subscriptions >/dev/null 2>&1; then
-    info "sub      $label — created on $plan_key"
-  else
-    warn "sub      $label — could not create subscription on $plan_key (create manually if needed)"
+
+  # Konnect v3: nested customer/plan keys (not flat customer_id/plan_key).
+  local body resp
+  body="$(jq -n --arg ck "$customer_key" --arg pk "$plan_key" \
+    '{customer:{key:$ck}, plan:{key:$pk}}')"
+
+  if resp="$(printf '%s' "$body" | kapi_post /subscriptions 2>&1)"; then
+    info "sub      $customer_key — created on $plan_key"
+    return 0
   fi
+
+  # Race or list lag — treat conflict as already subscribed.
+  if printf '%s' "$resp" | grep -qiE '409|Conflict|only_single_subscription'; then
+    info "sub      $customer_key — exists"
+    return 0
+  fi
+
+  warn "sub      $customer_key — could not create subscription on $plan_key (create manually if needed)"
+  [ -n "$resp" ] && warn "  $(printf '%s' "$resp" | tail -n 1)"
 }
 
 # --- arg parsing -----------------------------------------------------------

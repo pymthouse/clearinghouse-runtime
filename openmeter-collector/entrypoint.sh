@@ -3,10 +3,13 @@ set -eu
 
 load_env() {
   if [ -f "$1" ]; then
+    # .env files may contain empty assignments or comments; do not use set -u while sourcing.
+    set +u
     set -a
     # shellcheck disable=SC1090
     . "$1"
     set +a
+    set -u
   fi
 }
 

@@ -239,18 +239,39 @@ function Ensure-Customer($clientId, $externalUserId, $display, $subscribe) {
   if ($subscribe) { Ensure-Subscription $id $compound }
 }
 
-function Ensure-Subscription($customerId, $label) {
+function Subscription-ForCustomer($customerId) {
+  Items (Kapi-Get '/subscriptions') | Where-Object { $_.customer_id -eq $customerId } | Select-Object -First 1
+}
+
+function Ensure-Subscription($customerId, $customerKey) {
   $planKey = Plan-ConfigKey
   if (-not $planKey) { Warn 'no plan_key in catalog; skipping subscription'; return }
-  $existing = Items (Kapi-Get "/subscriptions?customer_id=$customerId") | Where-Object { $_.customer_id -eq $customerId }
-  if ($existing) { Info "sub      $label - exists"; return }
-  $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-  $body = [ordered]@{ customer_id = $customerId; plan_key = $planKey; active_from = $now }
-  try {
-    Kapi-Send 'post' '/subscriptions' ($body | ConvertTo-Json -Compress) | Out-Null
-    Info "sub      $label - created on $planKey"
+  if (Subscription-ForCustomer $customerId) { Info "sub      $customerKey - exists"; return }
+
+  # Konnect v3: nested customer/plan keys (not flat customer_id/plan_key).
+  $body = [ordered]@{
+    customer = @{ key = $customerKey }
+    plan     = @{ key = $planKey }
   }
-  catch { Warn "sub      $label - could not create subscription on $planKey (create manually if needed)" }
+  $bodyJson = $body | ConvertTo-Json -Compress
+  $errFile = [System.IO.Path]::GetTempFileName()
+  try {
+    $out = $bodyJson | & kongctl api post "$PREFIX/subscriptions" --base-url $BASE -o json -f - 2>$errFile
+    if ($LASTEXITCODE -ne 0) { throw [System.IO.File]::ReadAllText($errFile) }
+    Info "sub      $customerKey - created on $planKey"
+  }
+  catch {
+    $detail = $_.Exception.Message
+    if ([System.IO.File]::Exists($errFile)) { $detail += [System.IO.File]::ReadAllText($errFile) }
+    if ($detail -match '409|Conflict|only_single_subscription') {
+      Info "sub      $customerKey - exists"
+      return
+    }
+    Warn "sub      $customerKey - could not create subscription on $planKey (create manually if needed)"
+  }
+  finally {
+    if (Test-Path $errFile) { Remove-Item $errFile -Force }
+  }
 }
 
 # --- dispatch --------------------------------------------------------------
