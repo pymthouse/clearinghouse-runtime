@@ -10,7 +10,25 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
-const defaultRequiredScope = "sign:job"
+// Options configures claim extraction and scope requirements for incoming user JWTs.
+type Options struct {
+	ClientClaim    string
+	SubjectClaim   string
+	RequiredScopes []string
+}
+
+func (o Options) withDefaults() Options {
+	if strings.TrimSpace(o.ClientClaim) == "" {
+		o.ClientClaim = "azp"
+	}
+	if strings.TrimSpace(o.SubjectClaim) == "" {
+		o.SubjectClaim = "sub"
+	}
+	if len(o.RequiredScopes) == 0 {
+		o.RequiredScopes = []string{"sign:job"}
+	}
+	return o
+}
 
 // VerifiedUser is an end-user identity extracted from an Auth0 access token.
 type VerifiedUser struct {
@@ -22,12 +40,13 @@ type VerifiedUser struct {
 type Verifier struct {
 	issuer   string
 	audience string
+	opts     Options
 	cache    *jwk.Cache
 	jwksURL  string
 }
 
 // New creates a JWKS-cached OIDC access-token verifier.
-func New(ctx context.Context, issuer, audience string) (*Verifier, error) {
+func New(ctx context.Context, issuer, audience string, opts Options) (*Verifier, error) {
 	issuer = strings.TrimSuffix(strings.TrimSpace(issuer), "/")
 	audience = strings.TrimSpace(audience)
 	if issuer == "" {
@@ -46,6 +65,36 @@ func New(ctx context.Context, issuer, audience string) (*Verifier, error) {
 	return &Verifier{
 		issuer:   issuer,
 		audience: audience,
+		opts:     opts.withDefaults(),
+		cache:    cache,
+		jwksURL:  jwksURL,
+	}, nil
+}
+
+// NewWithJWKSURL creates a verifier that loads keys from an explicit JWKS URL (tests or OIDC_JWKS_URI overrides).
+func NewWithJWKSURL(ctx context.Context, issuer, audience, jwksURL string, opts Options) (*Verifier, error) {
+	issuer = strings.TrimSuffix(strings.TrimSpace(issuer), "/")
+	audience = strings.TrimSpace(audience)
+	jwksURL = strings.TrimSpace(jwksURL)
+	if issuer == "" {
+		return nil, fmt.Errorf("oidcverify: issuer is required")
+	}
+	if audience == "" {
+		return nil, fmt.Errorf("oidcverify: audience is required")
+	}
+	if jwksURL == "" {
+		return nil, fmt.Errorf("oidcverify: jwksURL is required")
+	}
+
+	cache := jwk.NewCache(ctx)
+	if err := cache.Register(jwksURL, jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
+		return nil, fmt.Errorf("oidcverify: register jwks: %w", err)
+	}
+
+	return &Verifier{
+		issuer:   issuer,
+		audience: audience,
+		opts:     opts.withDefaults(),
 		cache:    cache,
 		jwksURL:  jwksURL,
 	}, nil
@@ -78,25 +127,33 @@ func (v *Verifier) VerifyUserAccessToken(ctx context.Context, token, expectedCli
 		return nil, fmt.Errorf("jwt verification failed: iss not satisfied")
 	}
 
-	if err := requireScope(parsed, defaultRequiredScope); err != nil {
-		return nil, err
+	for _, scope := range v.opts.RequiredScopes {
+		if err := requireScope(parsed, scope); err != nil {
+			return nil, err
+		}
 	}
 
-	clientID := claimString(parsed, "azp")
+	clientID := claimString(parsed, v.opts.ClientClaim)
 	if clientID == "" {
-		return nil, fmt.Errorf("token missing azp claim")
+		clientID = claimString(parsed, "azp")
+	}
+	if clientID == "" {
+		return nil, fmt.Errorf("token missing %s claim", v.opts.ClientClaim)
 	}
 	expectedClientID = strings.TrimSpace(expectedClientID)
 	if expectedClientID != "" && clientID != expectedClientID {
 		return nil, fmt.Errorf("token azp does not match clientId")
 	}
 
-	externalUserID := claimString(parsed, "external_user_id")
+	externalUserID := claimString(parsed, v.opts.SubjectClaim)
+	if externalUserID == "" {
+		externalUserID = claimString(parsed, "external_user_id")
+	}
 	if externalUserID == "" {
 		externalUserID = parsed.Subject()
 	}
 	if externalUserID == "" {
-		return nil, fmt.Errorf("token missing sub claim")
+		return nil, fmt.Errorf("token missing %s claim", v.opts.SubjectClaim)
 	}
 
 	return &VerifiedUser{

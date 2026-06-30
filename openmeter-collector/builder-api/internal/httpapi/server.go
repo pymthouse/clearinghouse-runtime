@@ -3,16 +3,14 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
 
-	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/apikey"
 	auth0mgmt "github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mgmt"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
-	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/oidcverify"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/enduser"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
 )
 
@@ -22,20 +20,18 @@ type Server struct {
 	auth0       *auth0mgmt.Client
 	minter      *auth0mint.Minter
 	openmeter   *openmeter.Client
-	oidc        *oidcverify.Verifier
-	demoKeys    map[string]apikey.DemoEntry
+	enduser     *enduser.Resolver
 	openAPISpec []byte
 }
 
 // NewServer constructs the HTTP API server.
-func NewServer(cfg config.Config, auth0 *auth0mgmt.Client, minter *auth0mint.Minter, om *openmeter.Client, oidc *oidcverify.Verifier, demoKeys map[string]apikey.DemoEntry, openAPISpec []byte) *Server {
+func NewServer(cfg config.Config, auth0 *auth0mgmt.Client, minter *auth0mint.Minter, om *openmeter.Client, resolver *enduser.Resolver, openAPISpec []byte) *Server {
 	return &Server{
 		cfg:         cfg,
 		auth0:       auth0,
 		minter:      minter,
 		openmeter:   om,
-		oidc:        oidc,
-		demoKeys:    demoKeys,
+		enduser:     resolver,
 		openAPISpec: openAPISpec,
 	}
 }
@@ -46,8 +42,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /api/v1/docs", s.handleDocs)
 	mux.HandleFunc("POST /api/v1/apps/{clientId}/users", s.handleCreateUser)
-	mux.HandleFunc("POST /api/v1/apps/{clientId}/auth/api-key/signer-session", s.handleSignerSession)
-	mux.HandleFunc("POST /api/v1/apps/{clientId}/auth/oidc/signer-session", s.handleOIDCSignerSession)
+	mux.HandleFunc("POST /api/v1/apps/{clientId}/auth/signer-session", s.handleSignerSession)
 	return mux
 }
 
@@ -179,14 +174,6 @@ func (s *Server) handleSignerSession(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "missing bearer token", correlationID)
 		return
 	}
-	if apikey.IsM2MSecret(token) {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "M2M client secrets cannot be used as API keys", correlationID)
-		return
-	}
-	if !strings.HasPrefix(token, s.cfg.APIKeyPrefix) {
-		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "invalid api key", correlationID)
-		return
-	}
 
 	var req signerSessionRequest
 	if r.ContentLength > 0 {
@@ -203,69 +190,24 @@ func (s *Server) handleSignerSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	resolvedClientID, externalUserID, err := s.resolveAPIKey(ctx, token, clientID)
+	identity, err := s.enduser.ResolveBearer(ctx, token, clientID)
 	if err != nil {
-		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "invalid api key", correlationID)
+		writeOAuthError(
+			w,
+			enduser.OAuthHTTPStatus(err),
+			enduser.OAuthErrorCode(err),
+			enduser.OAuthErrorDescription(err),
+			correlationID,
+		)
 		return
 	}
 
-	if _, err := s.openmeter.EnsureCustomer(ctx, resolvedClientID, externalUserID, externalUserID); err != nil {
+	if _, err := s.openmeter.EnsureCustomer(ctx, identity.ClientID, identity.ExternalUserID, identity.ExternalUserID); err != nil {
 		writeOAuthError(w, http.StatusBadGateway, "server_error", "openmeter customer provisioning failed", correlationID)
 		return
 	}
 
-	s.writeSignerSession(w, ctx, resolvedClientID, externalUserID, scope, correlationID)
-}
-
-func (s *Server) handleOIDCSignerSession(w http.ResponseWriter, r *http.Request) {
-	correlationID := newCorrelationID()
-	clientID := strings.TrimSpace(r.PathValue("clientId"))
-	if clientID == "" {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "clientId is required", correlationID)
-		return
-	}
-	if s.oidc == nil {
-		writeOAuthError(w, http.StatusServiceUnavailable, "server_error", "oidc verification not configured", correlationID)
-		return
-	}
-
-	token := BearerToken(r)
-	if token == "" {
-		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "missing bearer token", correlationID)
-		return
-	}
-	if strings.HasPrefix(token, s.cfg.APIKeyPrefix) {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "use api-key signer-session for API keys", correlationID)
-		return
-	}
-
-	var req signerSessionRequest
-	if r.ContentLength > 0 {
-		parsed, err := readJSONBody[signerSessionRequest](r)
-		if err != nil {
-			writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error(), correlationID)
-			return
-		}
-		req = parsed
-	}
-	scope := strings.TrimSpace(req.Scope)
-	if scope == "" {
-		scope = "sign:job"
-	}
-
-	ctx := r.Context()
-	verified, err := s.oidc.VerifyUserAccessToken(ctx, token, clientID)
-	if err != nil {
-		writeOAuthError(w, http.StatusUnauthorized, "invalid_token", err.Error(), correlationID)
-		return
-	}
-
-	if _, err := s.openmeter.EnsureCustomer(ctx, verified.ClientID, verified.ExternalUserID, verified.ExternalUserID); err != nil {
-		writeOAuthError(w, http.StatusBadGateway, "server_error", "openmeter customer provisioning failed", correlationID)
-		return
-	}
-
-	s.writeSignerSession(w, ctx, verified.ClientID, verified.ExternalUserID, scope, correlationID)
+	s.writeSignerSession(w, ctx, identity.ClientID, identity.ExternalUserID, scope, correlationID)
 }
 
 func (s *Server) writeSignerSession(
@@ -297,18 +239,6 @@ func (s *Server) writeSignerSession(
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
-
-func (s *Server) resolveAPIKey(ctx context.Context, token, expectedClientID string) (clientID, externalUserID string, err error) {
-	if entry, ok := s.demoKeys[token]; ok {
-		if expectedClientID != "" && entry.ClientID != expectedClientID {
-			return "", "", errClientMismatch
-		}
-		return entry.ClientID, entry.UserID, nil
-	}
-	return s.auth0.ResolveAPIKeyUser(ctx, token, s.cfg.APIKeyPrefix, expectedClientID)
-}
-
-var errClientMismatch = errors.New("api key client mismatch")
 
 func readJSONBody[T any](r *http.Request) (T, error) {
 	var zero T

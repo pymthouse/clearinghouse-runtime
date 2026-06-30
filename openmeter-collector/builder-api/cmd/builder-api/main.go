@@ -14,6 +14,7 @@ import (
 	auth0mgmt "github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mgmt"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/enduser"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/httpapi"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/oidcverify"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
@@ -35,7 +36,11 @@ func main() {
 
 	minter := auth0mint.New(cfg.Auth0Issuer, cfg.Auth0Audience, cfg.SignerM2MClientID, cfg.SignerM2MSecret)
 	omClient := openmeter.New(cfg.OpenMeterURL, cfg.OpenMeterAPIKey)
-	oidcVerifier, err := oidcverify.New(context.Background(), cfg.Auth0Issuer, cfg.Auth0Audience)
+	oidcVerifier, err := oidcverify.New(context.Background(), cfg.Auth0Issuer, cfg.Auth0Audience, oidcverify.Options{
+		ClientClaim:    cfg.OIDCClientClaim,
+		SubjectClaim:   cfg.OIDCSubjectClaim,
+		RequiredScopes: cfg.OIDCRequiredScopes,
+	})
 	if err != nil {
 		log.Fatalf("oidc verifier: %v", err)
 	}
@@ -45,7 +50,18 @@ func main() {
 		log.Fatalf("demo api keys: %v", err)
 	}
 
-	srv := httpapi.NewServer(cfg, auth0Client, minter, omClient, oidcVerifier, demoKeys, openAPISpec)
+	keyStore := &apikey.Store{
+		Prefix: cfg.APIKeyPrefix,
+		Demo:   demoKeys,
+		Auth0:  auth0Client,
+	}
+	resolver := &enduser.Resolver{
+		OIDC:    oidcVerifier,
+		APIKeys: keyStore,
+		Prefix:  cfg.APIKeyPrefix,
+	}
+
+	srv := httpapi.NewServer(cfg, auth0Client, minter, omClient, resolver, openAPISpec)
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           srv.Handler(),
