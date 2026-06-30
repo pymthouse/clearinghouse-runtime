@@ -24,6 +24,9 @@ type Config struct {
 	DiscoveryURL      string
 	APIKeyPrefix      string
 	DemoAPIKeys       string
+	OIDCClientClaim   string
+	OIDCSubjectClaim  string
+	OIDCRequiredScopes []string
 }
 
 // Load reads configuration from environment variables.
@@ -46,7 +49,10 @@ func Load() (Config, error) {
 			"https://discovery-service-production-8955.up.railway.app/v1/discovery/raw?serviceType=legacy",
 		),
 		APIKeyPrefix: envOr("API_KEY_PREFIX", "sk_"),
-		DemoAPIKeys:       strings.TrimSpace(os.Getenv("DEMO_API_KEYS")),
+		DemoAPIKeys:        strings.TrimSpace(os.Getenv("DEMO_API_KEYS")),
+		OIDCClientClaim:    strings.TrimSpace(os.Getenv("OIDC_CLIENT_CLAIM")),
+		OIDCSubjectClaim:   strings.TrimSpace(os.Getenv("OIDC_SUBJECT_CLAIM")),
+		OIDCRequiredScopes: splitScopes(os.Getenv("OIDC_REQUIRED_SCOPES")),
 	}
 
 	if cfg.Auth0Issuer == "" && cfg.Auth0Domain != "" {
@@ -98,4 +104,22 @@ func firstEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func splitScopes(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t'
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

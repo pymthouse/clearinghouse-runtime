@@ -178,5 +178,5 @@ curl -sS -u "$AUTH0_SIGNER_M2M_CLIENT_ID:$AUTH0_SIGNER_M2M_CLIENT_SECRET" \
 curl -sS -H "Authorization: Bearer sk_..." \
   -H "Content-Type: application/json" \
   -d '{"scope":"sign:job"}' \
-  "http://localhost:8095/api/v1/apps/$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID/auth/api-key/signer-session"
+  "http://localhost:8095/api/v1/apps/$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID/auth/signer-session"
 ```

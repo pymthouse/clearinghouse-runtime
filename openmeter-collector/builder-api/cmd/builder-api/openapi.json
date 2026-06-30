@@ -66,52 +66,18 @@
         }
       }
     },
-    "/api/v1/apps/{clientId}/auth/api-key/signer-session": {
+    "/api/v1/apps/{clientId}/auth/signer-session": {
       "post": {
-        "summary": "Exchange API key for signer session",
-        "description": "Validates an end-user API key, upserts the OpenMeter customer, and mints a short-lived signer JWT via Auth0.",
-        "security": [{ "bearerApiKey": [] }],
-        "parameters": [
-          {
-            "name": "clientId",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string" }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/SignerSessionRequest" }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Signer session",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/SignerSession" }
-              }
-            }
-          },
-          "400": { "description": "Invalid request" },
-          "401": { "description": "Invalid API key" }
-        }
-      }
-    },
-    "/api/v1/apps/{clientId}/auth/oidc/signer-session": {
-      "post": {
-        "summary": "Exchange OIDC access token for signer session",
-        "description": "Validates an Auth0 end-user access token (device code or authorization code), upserts the OpenMeter customer keyed by clientId:sub, and mints a short-lived signer JWT.",
-        "security": [{ "bearerOidc": [] }],
+        "summary": "Exchange credentials for signer session",
+        "description": "Accepts Bearer `sk_…` (end-user API key) or Bearer Auth0 user JWT (device code / authorization code). Validates credentials (JWT tried first when bearer looks like a JWT), upserts the OpenMeter customer, and mints a short-lived signer JWT.",
+        "security": [{ "bearerCredentials": [] }],
         "parameters": [
           {
             "name": "clientId",
             "in": "path",
             "required": true,
             "schema": { "type": "string" },
-            "description": "Public Auth0 client id (must match token azp)"
+            "description": "Public Auth0 client id for the integrator app"
           }
         ],
         "requestBody": {
@@ -130,8 +96,8 @@
               }
             }
           },
-          "400": { "description": "Invalid request" },
-          "401": { "description": "Invalid OIDC token" }
+          "400": { "description": "Invalid request (e.g. M2M secret presented as API key)" },
+          "401": { "description": "Invalid API key or OIDC token" }
         }
       }
     }
@@ -143,16 +109,10 @@
         "scheme": "basic",
         "description": "M2M client id and secret (users:write)"
       },
-      "bearerApiKey": {
+      "bearerCredentials": {
         "type": "http",
         "scheme": "bearer",
-        "description": "End-user API key (sk_…)"
-      },
-      "bearerOidc": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "description": "Auth0 end-user access token from device code or authorization code"
+        "description": "End-user API key (sk_…) or Auth0 user JWT (device code / authorization code)"
       }
     },
     "schemas": {

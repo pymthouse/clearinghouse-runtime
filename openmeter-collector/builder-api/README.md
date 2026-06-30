@@ -9,8 +9,7 @@ Scalar docs: `GET /api/v1/docs` (spec at `/api/v1/openapi.json`).
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/apps/{clientId}/users` | M2M Basic | Create/upsert Auth0 user + OpenMeter customer; returns `apiKey` once |
-| `POST` | `/api/v1/apps/{clientId}/auth/api-key/signer-session` | Bearer `sk_…` | Exchange API key for short-lived signer JWT + upsert customer |
-| `POST` | `/api/v1/apps/{clientId}/auth/oidc/signer-session` | Bearer Auth0 user JWT | Exchange device/OIDC token for signer JWT + upsert OpenMeter customer |
+| `POST` | `/api/v1/apps/{clientId}/auth/signer-session` | Bearer `sk_…` or Auth0 user JWT | Exchange credentials for signer JWT + upsert OpenMeter customer (JWT tried first when bearer looks like a JWT) |
 
 ## Auth0 prerequisites
 
@@ -77,24 +76,24 @@ Use the public client id from `.env.livepeer` as the `{clientId}` path segment (
 
 ## Example: signer session
 
+Bearer may be an end-user API key (`sk_…`) or an Auth0 user access token from device login. Resolution mirrors [identity-webhook](../../identity-webhook/verifiers.mjs): JWT-shaped bearers are verified as OIDC first; otherwise `sk_…` keys are resolved via demo env or Auth0 `app_metadata`.
+
 ```bash
 API_KEY=sk_...   # from create-user response
 curl -sS -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"scope":"sign:job"}' \
-  "http://localhost:8095/api/v1/apps/${DEMO_APP_AUTH0_PUBLIC_CLIENT_ID}/auth/api-key/signer-session"
+  "http://localhost:8095/api/v1/apps/${DEMO_APP_AUTH0_PUBLIC_CLIENT_ID}/auth/signer-session"
 ```
 
-## Example: OIDC signer session (device code)
-
-After device login, exchange the Auth0 user access token to provision OpenMeter and mint a signer JWT:
+Device code (same endpoint):
 
 ```bash
 OIDC_TOKEN=...   # access_token from device code flow
 curl -sS -H "Authorization: Bearer $OIDC_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"scope":"sign:job"}' \
-  "http://localhost:8095/api/v1/apps/${DEMO_APP_AUTH0_PUBLIC_CLIENT_ID}/auth/oidc/signer-session"
+  "http://localhost:8095/api/v1/apps/${DEMO_APP_AUTH0_PUBLIC_CLIENT_ID}/auth/signer-session"
 ```
 
 The OpenMeter customer key is `{clientId}:{sub}` (e.g. `pub:google-oauth2|…`), matching the CloudEvent `subject`.
