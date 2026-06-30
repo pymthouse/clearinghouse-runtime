@@ -121,9 +121,9 @@ export function createOidcVerifier({
         }
       }
 
-      const usageSubject = payload[subjectClaim];
+      const usageSubject = payload[subjectClaim] ?? payload.sub;
       if (!usageSubject) {
-        throw new WebhookError(`token missing ${subjectClaim} claim`, {
+        throw new WebhookError(`token missing ${subjectClaim} or sub claim`, {
           status: 401,
           code: "invalid_token",
         });
@@ -131,7 +131,7 @@ export function createOidcVerifier({
 
       const identity = {
         issuer: identityIssuer,
-        client_id: String(payload[clientClaim] ?? jwtAudience),
+        client_id: String(payload[clientClaim] ?? payload.azp ?? jwtAudience),
         usage_subject: String(usageSubject),
         usage_subject_type: subjectTypeValue,
       };

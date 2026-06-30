@@ -15,6 +15,7 @@ import (
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/httpapi"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/oidcverify"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
 )
 
@@ -34,13 +35,17 @@ func main() {
 
 	minter := auth0mint.New(cfg.Auth0Issuer, cfg.Auth0Audience, cfg.SignerM2MClientID, cfg.SignerM2MSecret)
 	omClient := openmeter.New(cfg.OpenMeterURL, cfg.OpenMeterAPIKey)
+	oidcVerifier, err := oidcverify.New(context.Background(), cfg.Auth0Issuer, cfg.Auth0Audience)
+	if err != nil {
+		log.Fatalf("oidc verifier: %v", err)
+	}
 
 	demoKeys, err := apikey.LoadDemoStore(cfg.DemoAPIKeys)
 	if err != nil {
 		log.Fatalf("demo api keys: %v", err)
 	}
 
-	srv := httpapi.NewServer(cfg, auth0Client, minter, omClient, demoKeys, openAPISpec)
+	srv := httpapi.NewServer(cfg, auth0Client, minter, omClient, oidcVerifier, demoKeys, openAPISpec)
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           srv.Handler(),
