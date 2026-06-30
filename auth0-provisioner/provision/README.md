@@ -44,6 +44,7 @@ From [`apps.json`](apps.json):
 | Tenant settings | — | `default_audience` + `device_flow` (RFC 8628). Best-effort; skipped with a warning if the session lacks `update:tenant_settings`. |
 | Public client | `<App> Public` | `native`, `token_endpoint_auth_method: none`, grants `device_code` + `refresh_token`. |
 | M2M client | `<App> M2M` | `non_interactive`, `client_secret_post`, grant `client_credentials`. |
+| Management M2M | `Clearinghouse Builder Management` | Auth0 Management API (`create:users`, `read:users`, `update:users`) for Builder API user provisioning. |
 | Client grants | per client | Public + M2M each granted their configured scopes against the audience. |
 
 ## How it maps to the `auth0` CLI
@@ -77,3 +78,19 @@ curl -s -X POST "$AUTH0_ISSUER""oauth/device/code" \
 - Scaffolds and updates only — it never deletes clients/grants removed from `apps.json`.
 - Relies on the CLI session's permissions; reading the M2M secret needs the session to
   hold `read:client_keys` (the default interactive `auth0 login` does).
+
+## Builder API follow-up
+
+The Go **Builder API** in `openmeter-collector` provisions Auth0 **end-users**. Re-run `./bootstrap.sh` to
+ensure the **Clearinghouse Builder Management** M2M client is created and
+`AUTH0_MGMT_CLIENT_ID` / `AUTH0_MGMT_CLIENT_SECRET` are written to `.env.livepeer`
+(alongside the Demo App M2M used for signer-token mint).
+
+You still need a **Credentials Exchange Action** that copies `external_user_id` and `client_id`
+into minted access tokens:
+
+```bash
+./bootstrap-credentials-exchange-action.sh   # idempotent; requires auth0 login
+```
+
+See [openmeter-collector/builder-api/README.md](../../openmeter-collector/builder-api/README.md) for claim details and [identity-webhook/.env.example](../../identity-webhook/.env.example) for OIDC verifier env.
