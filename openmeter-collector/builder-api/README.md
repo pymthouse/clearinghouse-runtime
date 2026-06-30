@@ -9,7 +9,7 @@ Scalar docs: `GET /api/v1/docs` (spec at `/api/v1/openapi.json`).
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/apps/{clientId}/users` | M2M Basic | Create/upsert Auth0 user + OpenMeter customer; returns `apiKey` once |
-| `POST` | `/api/v1/apps/{clientId}/auth/signer-session` | Bearer `sk_…` or Auth0 user JWT | Exchange credentials for signer JWT + upsert OpenMeter customer (JWT tried first when bearer looks like a JWT) |
+| `POST` | `/api/v1/apps/{clientId}/oidc/token` | RFC 8693 form + subject token | Exchange Auth0 user JWT or `sk_*` API key for signer JWT + upsert OpenMeter customer |
 
 ## Auth0 prerequisites
 
@@ -52,7 +52,7 @@ exports.onExecuteCredentialsExchange = async (event, api) => {
 
 1. Deploy the Action.
 2. Bind it to the **Credentials Exchange** flow for your tenant.
-3. Re-test signer-session — the JWT must include `external_user_id` and `app_client_id` for [identity-webhook](../../identity-webhook) OIDC verification (`OIDC_SUBJECT_CLAIM=external_user_id`, `OIDC_CLIENT_CLAIM=app_client_id`). Auth0 rejects the reserved claim name `client_id`; use `app_client_id` instead.
+3. Re-test token exchange — the minted JWT must include `external_user_id` and `app_client_id` for [identity-webhook](../../identity-webhook) OIDC verification (`OIDC_SUBJECT_CLAIM=external_user_id`, `OIDC_CLIENT_CLAIM=app_client_id`). Auth0 rejects the reserved claim name `client_id`; use `app_client_id` instead.
 
 Without this Action, minted tokens verify at Auth0 but lack identity claims and the webhook rejects them.
 
@@ -74,26 +74,47 @@ curl -sS -u "$AUTH0_SIGNER_M2M_CLIENT_ID:$AUTH0_SIGNER_M2M_CLIENT_SECRET" \
 
 Use the public client id from `.env.livepeer` as the `{clientId}` path segment (e.g. `DEMO_APP_AUTH0_PUBLIC_CLIENT_ID`).
 
-## Example: signer session
+## Example: RFC 8693 signer session exchange
 
-Bearer may be an end-user API key (`sk_…`) or an Auth0 user access token from device login. Resolution mirrors [identity-webhook](../../identity-webhook/verifiers.mjs): JWT-shaped bearers are verified as OIDC first; otherwise `sk_…` keys are resolved via demo env or Auth0 `app_metadata`.
+Signer-session issuance uses **RFC 8693** at `POST /api/v1/apps/{clientId}/oidc/token` with `application/x-www-form-urlencoded` body fields:
+
+- `{clientId}` — public Auth0 client id for the integrator app (same path segment as `/users`)
+- `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`
+- `subject_token` — Auth0 user access token (device code) **or** end-user API key (`sk_*`)
+- `subject_token_type=urn:ietf:params:oauth:token-type:access_token`
+- `audience=livepeer-clearinghouse` (or omit; must match configured audience when provided)
+
+The subject token must belong to the public client named in the path (`azp` for JWTs, or API key issued for that client). Optional HTTP Basic auth with the signer M2M client is supported for server-side callers.
+
+API key:
 
 ```bash
-API_KEY=sk_...   # from create-user response
-curl -sS -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"scope":"sign:job"}' \
-  "http://localhost:8095/api/v1/apps/${DEMO_APP_AUTH0_PUBLIC_CLIENT_ID}/auth/signer-session"
+set -a; source openmeter-collector/.env; set +a
+PUBLIC_CLIENT_ID="$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID"
+API_KEY=sk_...
+curl -sS \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+  --data-urlencode "subject_token=$API_KEY" \
+  --data-urlencode "subject_token_type=urn:ietf:params:oauth:token-type:access_token" \
+  --data-urlencode "requested_token_type=urn:ietf:params:oauth:token-type:access_token" \
+  --data-urlencode "audience=livepeer-clearinghouse" \
+  "http://localhost:8095/api/v1/apps/${PUBLIC_CLIENT_ID}/oidc/token"
 ```
 
-Device code (same endpoint):
+Device code (user JWT as `subject_token`):
 
 ```bash
+PUBLIC_CLIENT_ID="$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID"
 OIDC_TOKEN=...   # access_token from device code flow
-curl -sS -H "Authorization: Bearer $OIDC_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"scope":"sign:job"}' \
-  "http://localhost:8095/api/v1/apps/${DEMO_APP_AUTH0_PUBLIC_CLIENT_ID}/auth/signer-session"
+curl -sS \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+  --data-urlencode "subject_token=$OIDC_TOKEN" \
+  --data-urlencode "subject_token_type=urn:ietf:params:oauth:token-type:access_token" \
+  --data-urlencode "requested_token_type=urn:ietf:params:oauth:token-type:access_token" \
+  --data-urlencode "audience=livepeer-clearinghouse" \
+  "http://localhost:8095/api/v1/apps/${PUBLIC_CLIENT_ID}/oidc/token"
 ```
 
 The OpenMeter customer key is `{clientId}:{sub}` (e.g. `pub:google-oauth2|…`), matching the CloudEvent `subject`.

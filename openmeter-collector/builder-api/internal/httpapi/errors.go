@@ -23,13 +23,35 @@ func newCorrelationID() string {
 	return uuid.NewString()
 }
 
+func setNoStoreHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+}
+
 func writeOAuthError(w http.ResponseWriter, status int, code, description, correlationID string) {
 	w.Header().Set("Content-Type", "application/json")
+	setNoStoreHeaders(w)
+	if status == http.StatusUnauthorized && code == "invalid_client" {
+		w.Header().Set("WWW-Authenticate", `Basic realm="token", charset="UTF-8"`)
+	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(OAuthError{
 		Error:            code,
 		ErrorDescription: description,
 		CorrelationID:    correlationID,
+	})
+}
+
+func writeTokenExchangeError(w http.ResponseWriter, status int, code, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	setNoStoreHeaders(w)
+	if status == http.StatusUnauthorized && code == "invalid_client" {
+		w.Header().Set("WWW-Authenticate", `Basic realm="token", charset="UTF-8"`)
+	}
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(OAuthError{
+		Error:            code,
+		ErrorDescription: description,
 	})
 }
 
@@ -43,4 +65,18 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeTokenJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	setNoStoreHeaders(w)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func oauthDescription(code, description string) string {
+	if description != "" {
+		return description
+	}
+	return code
 }

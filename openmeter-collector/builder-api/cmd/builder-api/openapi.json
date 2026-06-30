@@ -66,11 +66,10 @@
         }
       }
     },
-    "/api/v1/apps/{clientId}/auth/signer-session": {
+    "/api/v1/apps/{clientId}/oidc/token": {
       "post": {
-        "summary": "Exchange credentials for signer session",
-        "description": "Accepts Bearer `sk_…` (end-user API key) or Bearer Auth0 user JWT (device code / authorization code). Validates credentials (JWT tried first when bearer looks like a JWT), upserts the OpenMeter customer, and mints a short-lived signer JWT.",
-        "security": [{ "bearerCredentials": [] }],
+        "summary": "RFC 8693 signer session token exchange",
+        "description": "Exchanges an Auth0 end-user access token (device code / authorization code) or end-user API key (`sk_*`) for a short-lived signer JWT. The `{clientId}` path segment is the public Auth0 app client id. Authenticate with the end-user `subject_token`; optional HTTP Basic with the signer M2M client is supported for server-side callers.",
         "parameters": [
           {
             "name": "clientId",
@@ -81,9 +80,10 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/SignerSessionRequest" }
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/TokenExchangeRequest" }
             }
           }
         },
@@ -96,8 +96,8 @@
               }
             }
           },
-          "400": { "description": "Invalid request (e.g. M2M secret presented as API key)" },
-          "401": { "description": "Invalid API key or OIDC token" }
+          "400": { "description": "Invalid request, grant, target, or unsupported token type" },
+          "401": { "description": "Invalid client credentials" }
         }
       }
     }
@@ -107,12 +107,7 @@
       "m2mBasic": {
         "type": "http",
         "scheme": "basic",
-        "description": "M2M client id and secret (users:write)"
-      },
-      "bearerCredentials": {
-        "type": "http",
-        "scheme": "bearer",
-        "description": "End-user API key (sk_…) or Auth0 user JWT (device code / authorization code)"
+        "description": "M2M client id and secret (users:write, RFC 8693 token exchange)"
       }
     },
     "schemas": {
@@ -137,10 +132,38 @@
           "apiKey": { "type": "string", "description": "Returned once when issueApiKey is true" }
         }
       },
-      "SignerSessionRequest": {
+      "TokenExchangeRequest": {
         "type": "object",
+        "required": [
+          "grant_type",
+          "subject_token",
+          "subject_token_type"
+        ],
         "properties": {
-          "scope": { "type": "string", "description": "Defaults to sign:job" }
+          "grant_type": {
+            "type": "string",
+            "enum": ["urn:ietf:params:oauth:grant-type:token-exchange"]
+          },
+          "subject_token": {
+            "type": "string",
+            "description": "Auth0 user access token (JWT) or end-user API key (sk_*)"
+          },
+          "subject_token_type": {
+            "type": "string",
+            "enum": ["urn:ietf:params:oauth:token-type:access_token"]
+          },
+          "requested_token_type": {
+            "type": "string",
+            "enum": ["urn:ietf:params:oauth:token-type:access_token"]
+          },
+          "audience": {
+            "type": "string",
+            "description": "Must match configured signer audience when provided"
+          },
+          "resource": {
+            "type": "string",
+            "description": "Must match configured signer audience when provided"
+          }
         }
       },
       "SignerSession": {

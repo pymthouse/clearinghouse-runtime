@@ -85,7 +85,7 @@ uv run examples/device_login.py \
   --run-frames --signer http://localhost:8081
 ```
 
-Requires the clearinghouse stack (`identity-webhook`, `remote-signer`, `openmeter-collector`). Pass `--billing-url` so device login exchanges the Auth0 user token via `POST …/auth/signer-session` — that upserts the OpenMeter customer (`{clientId}:{sub}`) and returns a minted signer JWT with `signer_url` / `discovery_url`.
+Requires the clearinghouse stack (`identity-webhook`, `remote-signer`, `openmeter-collector`). Pass `--billing-url` and `--client-id` (public Auth0 client) so device login exchanges the Auth0 user token via RFC 8693 `POST …/api/v1/apps/{clientId}/oidc/token` — that upserts the OpenMeter customer (`{clientId}:{sub}`) and returns a minted signer JWT with `signer_url` / `discovery_url`.
 
 ## Limitations
 
