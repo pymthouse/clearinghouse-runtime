@@ -12,26 +12,29 @@ import (
 	auth0mgmt "github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mgmt"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/oidcverify"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
 )
 
 // Server wires Builder API routes and dependencies.
 type Server struct {
-	cfg        config.Config
-	auth0      *auth0mgmt.Client
-	minter     *auth0mint.Minter
-	openmeter  *openmeter.Client
-	demoKeys   map[string]apikey.DemoEntry
+	cfg         config.Config
+	auth0       *auth0mgmt.Client
+	minter      *auth0mint.Minter
+	openmeter   *openmeter.Client
+	oidc        *oidcverify.Verifier
+	demoKeys    map[string]apikey.DemoEntry
 	openAPISpec []byte
 }
 
 // NewServer constructs the HTTP API server.
-func NewServer(cfg config.Config, auth0 *auth0mgmt.Client, minter *auth0mint.Minter, om *openmeter.Client, demoKeys map[string]apikey.DemoEntry, openAPISpec []byte) *Server {
+func NewServer(cfg config.Config, auth0 *auth0mgmt.Client, minter *auth0mint.Minter, om *openmeter.Client, oidc *oidcverify.Verifier, demoKeys map[string]apikey.DemoEntry, openAPISpec []byte) *Server {
 	return &Server{
 		cfg:         cfg,
 		auth0:       auth0,
 		minter:      minter,
 		openmeter:   om,
+		oidc:        oidc,
 		demoKeys:    demoKeys,
 		openAPISpec: openAPISpec,
 	}
@@ -44,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/docs", s.handleDocs)
 	mux.HandleFunc("POST /api/v1/apps/{clientId}/users", s.handleCreateUser)
 	mux.HandleFunc("POST /api/v1/apps/{clientId}/auth/api-key/signer-session", s.handleSignerSession)
+	mux.HandleFunc("POST /api/v1/apps/{clientId}/auth/oidc/signer-session", s.handleOIDCSignerSession)
 	return mux
 }
 
@@ -157,6 +161,7 @@ type signerSessionResponse struct {
 	BalanceUsdMicros         string `json:"balanceUsdMicros"`
 	LifetimeGrantedUsdMicros string `json:"lifetimeGrantedUsdMicros"`
 	SignerURL                string `json:"signer_url,omitempty"`
+	DiscoveryURL             string `json:"discovery_url,omitempty"`
 	IssuedTokenType          string `json:"issued_token_type,omitempty"`
 	CorrelationID            string `json:"correlation_id,omitempty"`
 }
@@ -209,7 +214,66 @@ func (s *Server) handleSignerSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	minted, err := s.minter.MintSignerToken(ctx, resolvedClientID, externalUserID)
+	s.writeSignerSession(w, ctx, resolvedClientID, externalUserID, scope, correlationID)
+}
+
+func (s *Server) handleOIDCSignerSession(w http.ResponseWriter, r *http.Request) {
+	correlationID := newCorrelationID()
+	clientID := strings.TrimSpace(r.PathValue("clientId"))
+	if clientID == "" {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "clientId is required", correlationID)
+		return
+	}
+	if s.oidc == nil {
+		writeOAuthError(w, http.StatusServiceUnavailable, "server_error", "oidc verification not configured", correlationID)
+		return
+	}
+
+	token := BearerToken(r)
+	if token == "" {
+		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "missing bearer token", correlationID)
+		return
+	}
+	if strings.HasPrefix(token, s.cfg.APIKeyPrefix) {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "use api-key signer-session for API keys", correlationID)
+		return
+	}
+
+	var req signerSessionRequest
+	if r.ContentLength > 0 {
+		parsed, err := readJSONBody[signerSessionRequest](r)
+		if err != nil {
+			writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error(), correlationID)
+			return
+		}
+		req = parsed
+	}
+	scope := strings.TrimSpace(req.Scope)
+	if scope == "" {
+		scope = "sign:job"
+	}
+
+	ctx := r.Context()
+	verified, err := s.oidc.VerifyUserAccessToken(ctx, token, clientID)
+	if err != nil {
+		writeOAuthError(w, http.StatusUnauthorized, "invalid_token", err.Error(), correlationID)
+		return
+	}
+
+	if _, err := s.openmeter.EnsureCustomer(ctx, verified.ClientID, verified.ExternalUserID, verified.ExternalUserID); err != nil {
+		writeOAuthError(w, http.StatusBadGateway, "server_error", "openmeter customer provisioning failed", correlationID)
+		return
+	}
+
+	s.writeSignerSession(w, ctx, verified.ClientID, verified.ExternalUserID, scope, correlationID)
+}
+
+func (s *Server) writeSignerSession(
+	w http.ResponseWriter,
+	ctx context.Context,
+	clientID, externalUserID, scope, correlationID string,
+) {
+	minted, err := s.minter.MintSignerToken(ctx, clientID, externalUserID)
 	if err != nil {
 		writeOAuthError(w, http.StatusBadGateway, "server_error", "signer token mint failed", correlationID)
 		return
@@ -227,6 +291,9 @@ func (s *Server) handleSignerSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.cfg.SignerURL != "" {
 		resp.SignerURL = s.cfg.SignerURL
+	}
+	if s.cfg.DiscoveryURL != "" {
+		resp.DiscoveryURL = s.cfg.DiscoveryURL
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

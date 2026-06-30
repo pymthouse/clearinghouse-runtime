@@ -62,14 +62,30 @@ auth0 api post "client-grants" --data '{ "client_id": "...", "audience": "...", 
 
 ## Verify the device flow (RFC 8628)
 
+### curl
+
 ```bash
 set -a; source .env.livepeer; set +a
 PUB=$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID
-curl -s -X POST "$AUTH0_ISSUER""oauth/device/code" \
-  -d "client_id=$PUB" -d "audience=livepeer-clearinghouse" \
+curl -s -X POST "${AUTH0_ISSUER}oauth/device/code" \
+  -d "client_id=$PUB" -d "audience=$DEMO_APP_AUTH0_AUDIENCE" \
   -d "scope=openid sign:job offline_access"
 # open verification_uri_complete, approve, then poll /oauth/token with the device_code grant.
 ```
+
+### Python (livepeer-gateway)
+
+From the [livepeer-gateway](https://github.com/livepeer/livepeer-gateway) repo (device code → cached bearer → optional `write_frames`):
+
+```bash
+uv run examples/device_login.py \
+  --issuer https://pymthouse.us.auth0.com \
+  --client-id "$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID" \
+  --audience "$DEMO_APP_AUTH0_AUDIENCE" \
+  --run-frames --signer http://localhost:8081
+```
+
+Requires the clearinghouse stack (`identity-webhook`, `remote-signer`, `openmeter-collector`). Pass `--billing-url` so device login exchanges the Auth0 user token via `POST …/auth/oidc/signer-session` — that upserts the OpenMeter customer (`{clientId}:{sub}`) and returns a minted signer JWT with `signer_url` / `discovery_url`.
 
 ## Limitations
 

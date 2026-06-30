@@ -10,6 +10,7 @@ Scalar docs: `GET /api/v1/docs` (spec at `/api/v1/openapi.json`).
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/apps/{clientId}/users` | M2M Basic | Create/upsert Auth0 user + OpenMeter customer; returns `apiKey` once |
 | `POST` | `/api/v1/apps/{clientId}/auth/api-key/signer-session` | Bearer `sk_…` | Exchange API key for short-lived signer JWT + upsert customer |
+| `POST` | `/api/v1/apps/{clientId}/auth/oidc/signer-session` | Bearer Auth0 user JWT | Exchange device/OIDC token for signer JWT + upsert OpenMeter customer |
 
 ## Auth0 prerequisites
 
@@ -83,6 +84,20 @@ curl -sS -H "Authorization: Bearer $API_KEY" \
   -d '{"scope":"sign:job"}' \
   "http://localhost:8095/api/v1/apps/${DEMO_APP_AUTH0_PUBLIC_CLIENT_ID}/auth/api-key/signer-session"
 ```
+
+## Example: OIDC signer session (device code)
+
+After device login, exchange the Auth0 user access token to provision OpenMeter and mint a signer JWT:
+
+```bash
+OIDC_TOKEN=...   # access_token from device code flow
+curl -sS -H "Authorization: Bearer $OIDC_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"sign:job"}' \
+  "http://localhost:8095/api/v1/apps/${DEMO_APP_AUTH0_PUBLIC_CLIENT_ID}/auth/oidc/signer-session"
+```
+
+The OpenMeter customer key is `{clientId}:{sub}` (e.g. `pub:google-oauth2|…`), matching the CloudEvent `subject`.
 
 ## OpenMeter customer key
 

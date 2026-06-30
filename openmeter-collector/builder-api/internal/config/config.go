@@ -21,6 +21,7 @@ type Config struct {
 	OpenMeterURL      string
 	OpenMeterAPIKey   string
 	SignerURL         string
+	DiscoveryURL      string
 	APIKeyPrefix      string
 	DemoAPIKeys       string
 }
@@ -39,8 +40,12 @@ func Load() (Config, error) {
 		DBConnection:      envOr("AUTH0_DB_CONNECTION", "Username-Password-Authentication"),
 		OpenMeterURL:      envOr("OPENMETER_URL", "https://us.api.konghq.com/v3/openmeter"),
 		OpenMeterAPIKey:   strings.TrimSpace(os.Getenv("OPENMETER_API_KEY")),
-		SignerURL:         strings.TrimSpace(os.Getenv("SIGNER_URL")),
-		APIKeyPrefix:      envOr("API_KEY_PREFIX", "sk_"),
+		SignerURL: strings.TrimSpace(os.Getenv("SIGNER_URL")),
+		DiscoveryURL: envOr(
+			"DISCOVERY_URL",
+			"https://discovery-service-production-8955.up.railway.app/v1/discovery/raw?serviceType=legacy",
+		),
+		APIKeyPrefix: envOr("API_KEY_PREFIX", "sk_"),
 		DemoAPIKeys:       strings.TrimSpace(os.Getenv("DEMO_API_KEYS")),
 	}
 

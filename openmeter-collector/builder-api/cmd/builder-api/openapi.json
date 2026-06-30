@@ -99,6 +99,41 @@
           "401": { "description": "Invalid API key" }
         }
       }
+    },
+    "/api/v1/apps/{clientId}/auth/oidc/signer-session": {
+      "post": {
+        "summary": "Exchange OIDC access token for signer session",
+        "description": "Validates an Auth0 end-user access token (device code or authorization code), upserts the OpenMeter customer keyed by clientId:sub, and mints a short-lived signer JWT.",
+        "security": [{ "bearerOidc": [] }],
+        "parameters": [
+          {
+            "name": "clientId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Public Auth0 client id (must match token azp)"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SignerSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signer session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SignerSession" }
+              }
+            }
+          },
+          "400": { "description": "Invalid request" },
+          "401": { "description": "Invalid OIDC token" }
+        }
+      }
     }
   },
   "components": {
@@ -112,6 +147,12 @@
         "type": "http",
         "scheme": "bearer",
         "description": "End-user API key (sk_…)"
+      },
+      "bearerOidc": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Auth0 end-user access token from device code or authorization code"
       }
     },
     "schemas": {
@@ -160,6 +201,7 @@
           "balanceUsdMicros": { "type": "string" },
           "lifetimeGrantedUsdMicros": { "type": "string" },
           "signer_url": { "type": "string", "format": "uri" },
+          "discovery_url": { "type": "string", "format": "uri" },
           "issued_token_type": { "type": "string" },
           "correlation_id": { "type": "string" }
         }

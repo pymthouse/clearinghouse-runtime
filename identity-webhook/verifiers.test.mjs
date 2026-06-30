@@ -117,6 +117,37 @@ describe("createOidcVerifier (jose, locally-minted JWT)", () => {
     });
     await assert.rejects(() => verifier.verify({ authorization: "Bearer sk_not_a_jwt" }), /not a JWT/);
   });
+
+  it("prefers custom subject/client claims with sub/azp fallback (device vs exchange)", async () => {
+    const { privateKey, jwks } = await setup();
+    const verifier = createOidcVerifier({
+      jwtIssuer: "https://idp.test/",
+      jwtAudience: "clearinghouse",
+      jwks,
+      clientClaim: "app_client_id",
+      subjectClaim: "external_user_id",
+    });
+
+    const exchangeToken = await mint(privateKey, {
+      sub: "auth0|ignored",
+      azp: "ignored",
+      external_user_id: "demo-user",
+      app_client_id: "pub-client",
+      scope: "sign:job",
+    });
+    const exchange = await verifier.verify({ authorization: `Bearer ${exchangeToken}` });
+    assert.equal(exchange.identity.client_id, "pub-client");
+    assert.equal(exchange.identity.usage_subject, "demo-user");
+
+    const deviceToken = await mint(privateKey, {
+      sub: "auth0|device-user",
+      azp: "pub-client",
+      scope: "sign:job",
+    });
+    const device = await verifier.verify({ authorization: `Bearer ${deviceToken}` });
+    assert.equal(device.identity.client_id, "pub-client");
+    assert.equal(device.identity.usage_subject, "auth0|device-user");
+  });
 });
 
 describe("createEndUserVerifierFromEnv", () => {
