@@ -7,10 +7,10 @@ Docker Compose stack for the clearinghouse runtime:
 
 | Service | Role | Docs |
 | --- | --- | --- |
-| **identity-webhook** (`identity-webhook`) | Resolves end-user API keys to `auth_id` for go-livepeer's `/authorize` hook. Uses builder-sdk's API-key provider. | [builder-sdk](https://github.com/pymthouse/builder-sdk) |
+| **identity-webhook** (`identity-webhook`) | Resolves end-user credentials (API keys and/or Auth0 OIDC JWTs) to `auth_id` for go-livepeer's `/authorize` hook. Self-contained wire protocol + [`jose`](https://github.com/panva/jose) JWKS verification. | [jose](https://github.com/panva/jose) |
 | **Redpanda** (`kafka`) | Kafka-compatible event bus. The signer publishes gateway events; the collector consumes them. | [Redpanda docs](https://docs.redpanda.com/) |
 | **go-livepeer remote signer** (`remote-signer`) | Signs Livepeer payment tickets and emits `create_signed_ticket` events to Kafka. | [go-livepeer](https://github.com/livepeer/go-livepeer) |
-| **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. | [OpenMeter collector](https://openmeter.io/docs/collectors) |
+| **OpenMeter collector** (`openmeter-collector`) | Benthos pipeline: filters Kafka events, converts fees to USD micros, POSTs CloudEvents to OpenMeter ingest. Also hosts the **Builder API** (Go, port 8095) for Auth0 user provisioning, signer-session mint, and OpenMeter customer upsert. | [OpenMeter collector](https://openmeter.io/docs/collectors), [builder-api/README](openmeter-collector/builder-api/README.md) |
 | **Konnect / OpenMeter** (external) | Hosted metering and billing API. Set `OPENMETER_INGEST_URL` to your ingest endpoint. | [Konnect OpenMeter](https://docs.konghq.com/konnect/openmeter/), [self-hosted OpenMeter](https://openmeter.io/docs/deploy/kubernetes) |
 
 Data flow:
@@ -27,7 +27,7 @@ Signer HTTP request
 
 **Redpanda over Apache Kafka.** The stack uses Redpanda as the Kafka-compatible broker. Redpanda runs as a single-binary dev container with no ZooKeeper dependency and faster local startup.
 
-**Identity & auth.** The in-compose **identity-webhook** uses builder-sdk's API-key provider. The signer container runs `go-livepeer` directly; every signing request is authorized by go-livepeer's `-remoteSignerWebhookUrl` hook, which calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`. End users present `Authorization: Bearer sk_…` to the signer; the webhook resolves the key to `auth_id = "{client_id}:{usage_subject}"`. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
+**Identity & auth.** The in-compose **identity-webhook** implements go-livepeer's remote-signer webhook wire protocol in-repo (`identity-webhook/protocol.mjs`, `identity-webhook/verifiers.mjs`). It accepts **`Authorization: Bearer sk_…`** (API keys) and **`Authorization: Bearer <jwt>`** (Auth0 OIDC tokens from the Builder API signer-session exchange). Set `OIDC_ISSUER` / `OIDC_AUDIENCE` in `identity-webhook/.env` to verify JWTs; when both OIDC and API keys are configured, JWTs are tried first. The signer calls `/authorize` with `Authorization: Bearer <WEBHOOK_SECRET>`; end-user credentials resolve to `auth_id = "{client_id}:{usage_subject}"`. For local alive checks only, leave `REMOTE_SIGNER_WEBHOOK_URL` empty to omit the webhook hook.
 
 **CLI port not exposed.** go-livepeer's `-cliAddr` (admin/RPC) is bound to `127.0.0.1:4935` inside the container and is never published or mapped to the host. Only the signing HTTP port (`8081`) is exposed.
 
@@ -61,7 +61,7 @@ docker compose exec identity-webhook \
     -H "Authorization: Bearer dev-webhook-secret-change-me" \
     -H "Content-Type: application/json" \
     -d '{"headers":{"Authorization":["Bearer sk_demo_local_key"]}}'
-# expected: "status":200, "auth_id":"demo-client:demo-user"
+# expected: "status":200, "auth_id":"<publicClientId>:demo-user"
 ```
 
 Expected result: `remote-signer` starts cleanly, connects to Kafka, and serves the signing HTTP port.
@@ -94,10 +94,10 @@ Each service documents its variables in its own `.env.example`:
 
 | Service | Config file | Key variables |
 | --- | --- | --- |
-| `identity-webhook` | [`identity-webhook/.env.example`](identity-webhook/.env.example) | `WEBHOOK_SECRET`, `IDENTITY_ISSUER`, `DEMO_API_KEY`, `DEMO_CLIENT_ID`, `DEMO_USER_ID`, `API_KEY_PREFIX` (optional, default `sk_`) |
+| `identity-webhook` | [`identity-webhook/.env.example`](identity-webhook/.env.example) | `WEBHOOK_SECRET`, `IDENTITY_ISSUER`, `DEMO_API_KEY`, `DEMO_CLIENT_ID`, `DEMO_USER_ID`, `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_CLIENT_CLAIM`, `OIDC_SUBJECT_CLAIM`, `API_KEY_PREFIX` (optional) |
 | `kafka` | [`kafka/.env.example`](kafka/.env.example) | `KAFKA_ADVERTISED_ADDR` |
 | `remote-signer` | [`remote-signer/.env.example`](remote-signer/.env.example) | `REMOTE_SIGNER_WEBHOOK_URL`, `WEBHOOK_SECRET`, `SIGNER_*`, `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC` |
-| `openmeter-collector` | [`openmeter-collector/.env.example`](openmeter-collector/.env.example) | `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`, `OPENMETER_INGEST_URL`, `OPENMETER_API_KEY`, `PRICE_ORACLE_URL`, `PRICE_ORACLE_REFRESH` |
+| `openmeter-collector` | [`openmeter-collector/.env.example`](openmeter-collector/.env.example) | `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`, `OPENMETER_INGEST_URL`, `OPENMETER_URL`, `OPENMETER_API_KEY`, `PRICE_ORACLE_URL`, `PRICE_ORACLE_REFRESH`, `BUILDER_API_PORT`, `AUTH0_*`, `SIGNER_URL` |
 
 Signer state (keystore, `.eth-password`, chain DB) is stored under [`remote-signer/data/`](remote-signer/data/), bind-mounted to `/data` in the container.
 
@@ -159,4 +159,24 @@ The collector parses `auth_id` once (first-colon split) and emits normalized Clo
 - `data.usage_subject` = end user
 - `data.auth_id` retained for compatibility; `data.external_user_id` mirrors `usage_subject` for meter `groupBy`
 
-Demo API key defaults: `sk_demo_local_key` → `demo-client:demo-user` (configured in `identity-webhook/.env`).
+Demo API key defaults: `sk_demo_local_key` → `{publicClientId}:demo-user` (configured in `identity-webhook/.env` and `openmeter-collector/.env` `DEMO_API_KEYS`).
+
+## Builder API
+
+The Go Builder API runs inside `openmeter-collector` on port **8095**. Scalar docs: `http://localhost:8095/api/v1/docs`.
+
+After Auth0 bootstrap (`auth0-provisioner/provision/bootstrap.sh`) and OpenMeter catalog bootstrap, configure `openmeter-collector/.env` with your Konnect PAT and **Management API M2M** credentials. Tenant domain, issuer, audience, and signer M2M client id/secret are loaded automatically from `auth0-provisioner/provision/.env.livepeer` (mounted into the container).
+
+```bash
+# Create user (M2M Basic) — use public client id in path
+curl -sS -u "$AUTH0_SIGNER_M2M_CLIENT_ID:$AUTH0_SIGNER_M2M_CLIENT_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"externalUserId":"demo-user","email":"demo@example.com"}' \
+  "http://localhost:8095/api/v1/apps/$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID/users"
+
+# Signer session (Bearer api key from response)
+curl -sS -H "Authorization: Bearer sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"sign:job"}' \
+  "http://localhost:8095/api/v1/apps/$DEMO_APP_AUTH0_PUBLIC_CLIENT_ID/auth/api-key/signer-session"
+```
