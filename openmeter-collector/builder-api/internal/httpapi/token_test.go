@@ -41,11 +41,6 @@ func (s stubProvisioner) ProvisionSession(context.Context, openmeter.ProvisionCo
 	return &openmeter.SessionProvision{
 		Customer:    &openmeter.Customer{},
 		CustomerKey: "pub-client:demo-user",
-		Balance: openmeter.TrialCreditBalance{
-			HasAccess:                true,
-			BalanceUsdMicros:         "5000000",
-			LifetimeGrantedUsdMicros: "5000000",
-		},
 	}, nil
 }
 

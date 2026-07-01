@@ -56,6 +56,23 @@ exports.onExecuteCredentialsExchange = async (event, api) => {
 
 Without this Action, minted tokens verify at Auth0 but lack identity claims and the webhook rejects them.
 
+### 5. Identity-webhook (JWT subject-token verification)
+
+JWT `subject_token`s are **not** verified in-process. The Builder API forwards them to the
+[identity-webhook](../../identity-webhook) `POST /authorize` contract, which owns Auth0 JWKS
+verification and claim extraction. `sk_*` API-key subject tokens are still resolved directly
+against Auth0 `app_metadata` by the Builder API.
+
+Set both to enable JWT exchange (defaults `IDENTITY_WEBHOOK_URL` to `REMOTE_SIGNER_WEBHOOK_URL`):
+
+```bash
+IDENTITY_WEBHOOK_URL=http://identity-webhook:8090
+WEBHOOK_SECRET=...   # shared with the identity-webhook
+```
+
+The webhook must run in `IDENTITY_AUTH_MODE=oidc` to verify JWTs. If unset, JWT subject tokens
+are rejected with `invalid_grant` (API-key exchange still works).
+
 ### 4. Signer M2M (from bootstrap)
 
 Provided automatically via mounted `.env.livepeer` (`DEMO_APP_AUTH0_M2M_CLIENT_ID` /

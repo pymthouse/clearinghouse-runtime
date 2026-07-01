@@ -125,9 +125,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.openmeter.ProvisionSession(ctx, openmeter.ProvisionConfig{
-		DefaultPlanKey:               s.cfg.OpenMeterDefaultPlanKey,
-		TrialFeatureKey:              s.cfg.OpenMeterTrialFeatureKey,
-		DefaultStarterIncludedMicros: s.cfg.OpenMeterDefaultStarterIncludedUsdMicros,
+		DefaultPlanKey: s.cfg.OpenMeterDefaultPlanKey,
 	}, clientID, externalUserID); err != nil {
 		writeAPIError(w, http.StatusBadGateway, "openmeter customer provisioning failed")
 		return

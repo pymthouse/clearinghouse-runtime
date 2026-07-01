@@ -7,7 +7,6 @@ import (
 	auth0mint "github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/apikey"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
-	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/oidcverify"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
 )
 
@@ -26,16 +25,14 @@ type Request struct {
 
 // Result is a signer-session token exchange response.
 type Result struct {
-	AccessToken              string
-	TokenType                string
-	ExpiresIn                int
-	Scope                    string
-	BalanceUsdMicros         string
-	LifetimeGrantedUsdMicros string
-	SignerURL                string
-	DiscoveryURL             string
-	IssuedTokenType          string
-	CorrelationID            string
+	AccessToken     string
+	TokenType       string
+	ExpiresIn       int
+	Scope           string
+	SignerURL       string
+	DiscoveryURL    string
+	IssuedTokenType string
+	CorrelationID   string
 }
 
 // SignerMinter mints short-lived signer JWTs.
@@ -43,15 +40,21 @@ type SignerMinter interface {
 	MintSignerToken(ctx context.Context, publicClientID, externalUserID string) (*auth0mint.TokenResponse, error)
 }
 
-// SessionProvisioner upserts OpenMeter customer, subscription, and allowance.
+// SessionProvisioner upserts the OpenMeter customer and default-plan subscription.
 type SessionProvisioner interface {
 	ProvisionSession(ctx context.Context, cfg openmeter.ProvisionConfig, clientID, externalUserID string) (*openmeter.SessionProvision, error)
+}
+
+// UserTokenVerifier verifies an end-user access token (JWT) and returns the tenant
+// client id and external user id. Implemented by the identity-webhook client.
+type UserTokenVerifier interface {
+	VerifyUserAccessToken(ctx context.Context, token, expectedClientID string) (clientID, externalUserID string, err error)
 }
 
 // Handler performs RFC 8693 signer JWT token exchange.
 type Handler struct {
 	cfg       config.Config
-	oidc      *oidcverify.Verifier
+	verifier  UserTokenVerifier
 	apiKeys   *apikey.Store
 	minter    SignerMinter
 	openmeter SessionProvisioner
@@ -60,14 +63,14 @@ type Handler struct {
 // NewHandler constructs a token exchange handler.
 func NewHandler(
 	cfg config.Config,
-	oidc *oidcverify.Verifier,
+	verifier UserTokenVerifier,
 	apiKeys *apikey.Store,
 	minter SignerMinter,
 	om SessionProvisioner,
 ) *Handler {
 	return &Handler{
 		cfg:       cfg,
-		oidc:      oidc,
+		verifier:  verifier,
 		apiKeys:   apiKeys,
 		minter:    minter,
 		openmeter: om,
@@ -106,12 +109,8 @@ func (h *Handler) Exchange(ctx context.Context, req Request, correlationID strin
 		return nil, err
 	}
 
-	provision, err := h.openmeter.ProvisionSession(ctx, h.provisionConfig(), clientID, externalUserID)
-	if err != nil {
+	if _, err := h.openmeter.ProvisionSession(ctx, h.provisionConfig(), clientID, externalUserID); err != nil {
 		return nil, wrapServerError(err)
-	}
-	if !provision.Balance.HasAccess {
-		return nil, insufficientAllowance("trial credits exhausted")
 	}
 
 	minted, err := h.minter.MintSignerToken(ctx, clientID, externalUserID)
@@ -125,14 +124,12 @@ func (h *Handler) Exchange(ctx context.Context, req Request, correlationID strin
 	}
 
 	result := &Result{
-		AccessToken:              minted.AccessToken,
-		TokenType:                "Bearer",
-		ExpiresIn:                minted.ExpiresIn,
-		Scope:                    scope,
-		BalanceUsdMicros:         provision.Balance.BalanceUsdMicros,
-		LifetimeGrantedUsdMicros: provision.Balance.LifetimeGrantedUsdMicros,
-		IssuedTokenType:          IssuedAccessTokenType,
-		CorrelationID:            correlationID,
+		AccessToken:     minted.AccessToken,
+		TokenType:       "Bearer",
+		ExpiresIn:       minted.ExpiresIn,
+		Scope:           scope,
+		IssuedTokenType: IssuedAccessTokenType,
+		CorrelationID:   correlationID,
 	}
 	if h.cfg.SignerURL != "" {
 		result.SignerURL = h.cfg.SignerURL
@@ -145,9 +142,7 @@ func (h *Handler) Exchange(ctx context.Context, req Request, correlationID strin
 
 func (h *Handler) provisionConfig() openmeter.ProvisionConfig {
 	return openmeter.ProvisionConfig{
-		DefaultPlanKey:               h.cfg.OpenMeterDefaultPlanKey,
-		TrialFeatureKey:              h.cfg.OpenMeterTrialFeatureKey,
-		DefaultStarterIncludedMicros: h.cfg.OpenMeterDefaultStarterIncludedUsdMicros,
+		DefaultPlanKey: h.cfg.OpenMeterDefaultPlanKey,
 	}
 }
 
@@ -209,14 +204,14 @@ func (h *Handler) validateTarget(resource string, audiences []string) error {
 func (h *Handler) resolveSubject(ctx context.Context, subjectToken, publicClientID string) (clientID, externalUserID string, err error) {
 	subjectToken = strings.TrimSpace(subjectToken)
 	if strings.Count(subjectToken, ".") == 2 {
-		if h.oidc == nil {
+		if h.verifier == nil {
 			return "", "", invalidGrant("subject_token is not a valid access token for this issuer")
 		}
-		verified, verifyErr := h.oidc.VerifyUserAccessToken(ctx, subjectToken, publicClientID)
+		verifiedClientID, verifiedUserID, verifyErr := h.verifier.VerifyUserAccessToken(ctx, subjectToken, publicClientID)
 		if verifyErr != nil {
 			return "", "", invalidGrant("subject_token is not a valid access token for this issuer")
 		}
-		return verified.ClientID, verified.ExternalUserID, nil
+		return verifiedClientID, verifiedUserID, nil
 	}
 
 	if !strings.HasPrefix(subjectToken, h.cfg.APIKeyPrefix) {

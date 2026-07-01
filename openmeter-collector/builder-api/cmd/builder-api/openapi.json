@@ -172,17 +172,13 @@
           "access_token",
           "token_type",
           "expires_in",
-          "scope",
-          "balanceUsdMicros",
-          "lifetimeGrantedUsdMicros"
+          "scope"
         ],
         "properties": {
           "access_token": { "type": "string" },
           "token_type": { "type": "string", "enum": ["Bearer"] },
           "expires_in": { "type": "integer" },
           "scope": { "type": "string" },
-          "balanceUsdMicros": { "type": "string" },
-          "lifetimeGrantedUsdMicros": { "type": "string" },
           "signer_url": { "type": "string", "format": "uri" },
           "discovery_url": { "type": "string", "format": "uri" },
           "issued_token_type": { "type": "string" },

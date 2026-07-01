@@ -11,16 +11,14 @@ import (
 )
 
 type tokenExchangeResponse struct {
-	AccessToken              string `json:"access_token"`
-	TokenType                string `json:"token_type"`
-	ExpiresIn                int    `json:"expires_in"`
-	Scope                    string `json:"scope"`
-	BalanceUsdMicros         string `json:"balanceUsdMicros"`
-	LifetimeGrantedUsdMicros string `json:"lifetimeGrantedUsdMicros"`
-	SignerURL                string `json:"signer_url,omitempty"`
-	DiscoveryURL             string `json:"discovery_url,omitempty"`
-	IssuedTokenType          string `json:"issued_token_type,omitempty"`
-	CorrelationID            string `json:"correlation_id,omitempty"`
+	AccessToken     string `json:"access_token"`
+	TokenType       string `json:"token_type"`
+	ExpiresIn       int    `json:"expires_in"`
+	Scope           string `json:"scope"`
+	SignerURL       string `json:"signer_url,omitempty"`
+	DiscoveryURL    string `json:"discovery_url,omitempty"`
+	IssuedTokenType string `json:"issued_token_type,omitempty"`
+	CorrelationID   string `json:"correlation_id,omitempty"`
 }
 
 func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request) {
@@ -80,15 +78,13 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeTokenJSON(w, http.StatusOK, tokenExchangeResponse{
-		AccessToken:              result.AccessToken,
-		TokenType:                result.TokenType,
-		ExpiresIn:                result.ExpiresIn,
-		Scope:                    result.Scope,
-		BalanceUsdMicros:         result.BalanceUsdMicros,
-		LifetimeGrantedUsdMicros: result.LifetimeGrantedUsdMicros,
-		SignerURL:                result.SignerURL,
-		DiscoveryURL:             result.DiscoveryURL,
-		IssuedTokenType:          result.IssuedTokenType,
-		CorrelationID:            result.CorrelationID,
+		AccessToken:     result.AccessToken,
+		TokenType:       result.TokenType,
+		ExpiresIn:       result.ExpiresIn,
+		Scope:           result.Scope,
+		SignerURL:       result.SignerURL,
+		DiscoveryURL:    result.DiscoveryURL,
+		IssuedTokenType: result.IssuedTokenType,
+		CorrelationID:   result.CorrelationID,
 	})
 }

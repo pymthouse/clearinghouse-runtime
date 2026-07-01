@@ -15,9 +15,9 @@ import (
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/auth0mint"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/config"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/httpapi"
-	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/oidcverify"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/openmeter"
 	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/tokenexchange"
+	"github.com/livepeer/clearinghouse/openmeter-collector/builder-api/internal/webhookverify"
 )
 
 //go:embed openapi.json
@@ -36,13 +36,13 @@ func main() {
 
 	minter := auth0mint.New(cfg.Auth0Issuer, cfg.Auth0Audience, cfg.SignerM2MClientID, cfg.SignerM2MSecret)
 	omClient := openmeter.New(cfg.OpenMeterURL, cfg.OpenMeterAPIKey)
-	oidcVerifier, err := oidcverify.New(context.Background(), cfg.Auth0Issuer, cfg.Auth0Audience, oidcverify.Options{
-		ClientClaim:    cfg.OIDCClientClaim,
-		SubjectClaim:   cfg.OIDCSubjectClaim,
-		RequiredScopes: cfg.OIDCRequiredScopes,
-	})
-	if err != nil {
-		log.Fatalf("oidc verifier: %v", err)
+
+	// End-user JWT verification is delegated to the identity-webhook (POST /authorize).
+	var verifier tokenexchange.UserTokenVerifier
+	if cfg.IdentityWebhookURL != "" && cfg.WebhookSecret != "" {
+		verifier = webhookverify.New(cfg.IdentityWebhookURL, cfg.WebhookSecret)
+	} else {
+		log.Printf("identity-webhook not configured; JWT subject tokens will be rejected (set IDENTITY_WEBHOOK_URL + WEBHOOK_SECRET)")
 	}
 
 	demoKeys, err := apikey.LoadDemoStore(cfg.DemoAPIKeys)
@@ -55,7 +55,7 @@ func main() {
 		Demo:   demoKeys,
 		Auth0:  auth0Client,
 	}
-	tokenHandler := tokenexchange.NewHandler(cfg, oidcVerifier, keyStore, minter, omClient)
+	tokenHandler := tokenexchange.NewHandler(cfg, verifier, keyStore, minter, omClient)
 
 	srv := httpapi.NewServer(cfg, auth0Client, minter, omClient, tokenHandler, openAPISpec)
 	server := &http.Server{

@@ -21,15 +21,14 @@ type Config struct {
 	OpenMeterURL      string
 	OpenMeterAPIKey   string
 	OpenMeterDefaultPlanKey string
-	OpenMeterTrialFeatureKey string
-	OpenMeterDefaultStarterIncludedUsdMicros int64
 	SignerURL         string
 	DiscoveryURL      string
 	APIKeyPrefix      string
 	DemoAPIKeys       string
-	OIDCClientClaim   string
-	OIDCSubjectClaim  string
-	OIDCRequiredScopes []string
+	// IdentityWebhookURL and WebhookSecret delegate end-user JWT verification to the
+	// identity-webhook service (POST /authorize). JWT subject tokens require both.
+	IdentityWebhookURL string
+	WebhookSecret      string
 }
 
 // Load reads configuration from environment variables.
@@ -47,21 +46,15 @@ func Load() (Config, error) {
 		OpenMeterURL:      envOr("OPENMETER_URL", "https://us.api.konghq.com/v3/openmeter"),
 		OpenMeterAPIKey:   strings.TrimSpace(os.Getenv("OPENMETER_API_KEY")),
 		OpenMeterDefaultPlanKey: envOr("OPENMETER_DEFAULT_PLAN_KEY", "clearinghouse_default_ppu"),
-		OpenMeterTrialFeatureKey: envOr("OPENMETER_TRIAL_FEATURE_KEY", "network_spend"),
-		OpenMeterDefaultStarterIncludedUsdMicros: envInt64Or(
-			"OPENMETER_DEFAULT_STARTER_INCLUDED_USD_MICROS",
-			5_000_000,
-		),
 		SignerURL: strings.TrimSpace(os.Getenv("SIGNER_URL")),
 		DiscoveryURL: envOr(
 			"DISCOVERY_URL",
 			"https://discovery-service-production-8955.up.railway.app/v1/discovery/raw?serviceType=legacy",
 		),
-		APIKeyPrefix: envOr("API_KEY_PREFIX", "sk_"),
+		APIKeyPrefix:       envOr("API_KEY_PREFIX", "sk_"),
 		DemoAPIKeys:        strings.TrimSpace(os.Getenv("DEMO_API_KEYS")),
-		OIDCClientClaim:    strings.TrimSpace(os.Getenv("OIDC_CLIENT_CLAIM")),
-		OIDCSubjectClaim:   strings.TrimSpace(os.Getenv("OIDC_SUBJECT_CLAIM")),
-		OIDCRequiredScopes: splitScopes(os.Getenv("OIDC_REQUIRED_SCOPES")),
+		IdentityWebhookURL: firstEnv("IDENTITY_WEBHOOK_URL", "REMOTE_SIGNER_WEBHOOK_URL"),
+		WebhookSecret:      strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")),
 	}
 
 	if cfg.Auth0Issuer == "" && cfg.Auth0Domain != "" {
@@ -115,32 +108,3 @@ func firstEnv(keys ...string) string {
 	return ""
 }
 
-func envInt64Or(key string, fallback int64) int64 {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback
-	}
-	v, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return fallback
-	}
-	return v
-}
-
-func splitScopes(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	parts := strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == ' ' || r == '\t'
-	})
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
