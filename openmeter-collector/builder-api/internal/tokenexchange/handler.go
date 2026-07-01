@@ -43,9 +43,9 @@ type SignerMinter interface {
 	MintSignerToken(ctx context.Context, publicClientID, externalUserID string) (*auth0mint.TokenResponse, error)
 }
 
-// CustomerProvisioner upserts OpenMeter customers.
-type CustomerProvisioner interface {
-	EnsureCustomer(ctx context.Context, clientID, externalUserID, displayName string) (*openmeter.Customer, error)
+// SessionProvisioner upserts OpenMeter customer, subscription, and allowance.
+type SessionProvisioner interface {
+	ProvisionSession(ctx context.Context, cfg openmeter.ProvisionConfig, clientID, externalUserID string) (*openmeter.SessionProvision, error)
 }
 
 // Handler performs RFC 8693 signer JWT token exchange.
@@ -54,7 +54,7 @@ type Handler struct {
 	oidc      *oidcverify.Verifier
 	apiKeys   *apikey.Store
 	minter    SignerMinter
-	openmeter CustomerProvisioner
+	openmeter SessionProvisioner
 }
 
 // NewHandler constructs a token exchange handler.
@@ -63,7 +63,7 @@ func NewHandler(
 	oidc *oidcverify.Verifier,
 	apiKeys *apikey.Store,
 	minter SignerMinter,
-	om CustomerProvisioner,
+	om SessionProvisioner,
 ) *Handler {
 	return &Handler{
 		cfg:       cfg,
@@ -106,8 +106,12 @@ func (h *Handler) Exchange(ctx context.Context, req Request, correlationID strin
 		return nil, err
 	}
 
-	if _, err := h.openmeter.EnsureCustomer(ctx, clientID, externalUserID, externalUserID); err != nil {
+	provision, err := h.openmeter.ProvisionSession(ctx, h.provisionConfig(), clientID, externalUserID)
+	if err != nil {
 		return nil, wrapServerError(err)
+	}
+	if !provision.Balance.HasAccess {
+		return nil, insufficientAllowance("trial credits exhausted")
 	}
 
 	minted, err := h.minter.MintSignerToken(ctx, clientID, externalUserID)
@@ -125,8 +129,8 @@ func (h *Handler) Exchange(ctx context.Context, req Request, correlationID strin
 		TokenType:                "Bearer",
 		ExpiresIn:                minted.ExpiresIn,
 		Scope:                    scope,
-		BalanceUsdMicros:         "0",
-		LifetimeGrantedUsdMicros: "0",
+		BalanceUsdMicros:         provision.Balance.BalanceUsdMicros,
+		LifetimeGrantedUsdMicros: provision.Balance.LifetimeGrantedUsdMicros,
 		IssuedTokenType:          IssuedAccessTokenType,
 		CorrelationID:            correlationID,
 	}
@@ -137,6 +141,14 @@ func (h *Handler) Exchange(ctx context.Context, req Request, correlationID strin
 		result.DiscoveryURL = h.cfg.DiscoveryURL
 	}
 	return result, nil
+}
+
+func (h *Handler) provisionConfig() openmeter.ProvisionConfig {
+	return openmeter.ProvisionConfig{
+		DefaultPlanKey:               h.cfg.OpenMeterDefaultPlanKey,
+		TrialFeatureKey:              h.cfg.OpenMeterTrialFeatureKey,
+		DefaultStarterIncludedMicros: h.cfg.OpenMeterDefaultStarterIncludedUsdMicros,
+	}
 }
 
 func (h *Handler) validateClient(clientID, clientSecret string) error {

@@ -20,6 +20,9 @@ type Config struct {
 	DBConnection      string
 	OpenMeterURL      string
 	OpenMeterAPIKey   string
+	OpenMeterDefaultPlanKey string
+	OpenMeterTrialFeatureKey string
+	OpenMeterDefaultStarterIncludedUsdMicros int64
 	SignerURL         string
 	DiscoveryURL      string
 	APIKeyPrefix      string
@@ -43,6 +46,12 @@ func Load() (Config, error) {
 		DBConnection:      envOr("AUTH0_DB_CONNECTION", "Username-Password-Authentication"),
 		OpenMeterURL:      envOr("OPENMETER_URL", "https://us.api.konghq.com/v3/openmeter"),
 		OpenMeterAPIKey:   strings.TrimSpace(os.Getenv("OPENMETER_API_KEY")),
+		OpenMeterDefaultPlanKey: envOr("OPENMETER_DEFAULT_PLAN_KEY", "clearinghouse_default_ppu"),
+		OpenMeterTrialFeatureKey: envOr("OPENMETER_TRIAL_FEATURE_KEY", "network_spend"),
+		OpenMeterDefaultStarterIncludedUsdMicros: envInt64Or(
+			"OPENMETER_DEFAULT_STARTER_INCLUDED_USD_MICROS",
+			5_000_000,
+		),
 		SignerURL: strings.TrimSpace(os.Getenv("SIGNER_URL")),
 		DiscoveryURL: envOr(
 			"DISCOVERY_URL",
@@ -104,6 +113,18 @@ func firstEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func envInt64Or(key string, fallback int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 func splitScopes(raw string) []string {

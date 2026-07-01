@@ -53,6 +53,10 @@ func serverError(description string) *Error {
 	return newError("server_error", description, description, 500)
 }
 
+func insufficientAllowance(description string) *Error {
+	return newError("insufficient_allowance", description, description, 402)
+}
+
 func wrapServerError(err error) *Error {
 	return serverError(fmt.Sprintf("internal error: %v", err))
 }

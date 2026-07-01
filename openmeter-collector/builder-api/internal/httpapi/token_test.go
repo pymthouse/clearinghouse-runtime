@@ -26,10 +26,27 @@ func (stubMinter) MintSignerToken(context.Context, string, string) (*auth0mint.T
 	}, nil
 }
 
-type stubOpenMeter struct{}
+type stubProvisioner struct {
+	provision *openmeter.SessionProvision
+	err       error
+}
 
-func (stubOpenMeter) EnsureCustomer(context.Context, string, string, string) (*openmeter.Customer, error) {
-	return &openmeter.Customer{}, nil
+func (s stubProvisioner) ProvisionSession(context.Context, openmeter.ProvisionConfig, string, string) (*openmeter.SessionProvision, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.provision != nil {
+		return s.provision, nil
+	}
+	return &openmeter.SessionProvision{
+		Customer:    &openmeter.Customer{},
+		CustomerKey: "pub-client:demo-user",
+		Balance: openmeter.TrialCreditBalance{
+			HasAccess:                true,
+			BalanceUsdMicros:         "5000000",
+			LifetimeGrantedUsdMicros: "5000000",
+		},
+	}, nil
 }
 
 func TestHandleOIDCTokenRejectsUnsupportedGrantType(t *testing.T) {
@@ -51,7 +68,7 @@ func TestHandleOIDCTokenRejectsUnsupportedGrantType(t *testing.T) {
 			},
 		},
 		stubMinter{},
-		stubOpenMeter{},
+		stubProvisioner{},
 	)
 	srv := httpapi.NewServer(cfg, nil, nil, nil, handler, nil)
 
@@ -92,7 +109,7 @@ func TestHandleOIDCTokenAPIKeyExchange(t *testing.T) {
 			},
 		},
 		stubMinter{},
-		stubOpenMeter{},
+		stubProvisioner{},
 	)
 	srv := httpapi.NewServer(cfg, nil, nil, nil, handler, nil)
 

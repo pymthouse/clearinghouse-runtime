@@ -50,11 +50,6 @@ func New(baseURL, apiKey string) *Client {
 	}
 }
 
-// CustomerKey returns the compound billing subject key.
-func CustomerKey(clientID, externalUserID string) string {
-	return strings.TrimSpace(clientID) + ":" + strings.TrimSpace(externalUserID)
-}
-
 // EnsureCustomer creates a customer when missing; idempotent on key.
 func (c *Client) EnsureCustomer(ctx context.Context, clientID, externalUserID, displayName string) (*Customer, error) {
 	key := CustomerKey(clientID, externalUserID)

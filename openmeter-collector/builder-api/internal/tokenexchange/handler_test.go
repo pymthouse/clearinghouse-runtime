@@ -34,10 +34,30 @@ func (s stubMinter) MintSignerToken(_ context.Context, _, _ string) (*auth0mint.
 	return s.response, nil
 }
 
-type stubOpenMeter struct{}
+type stubProvisioner struct {
+	provision *openmeter.SessionProvision
+	err       error
+	calls     int
+}
 
-func (stubOpenMeter) EnsureCustomer(context.Context, string, string, string) (*openmeter.Customer, error) {
-	return &openmeter.Customer{}, nil
+func (s *stubProvisioner) ProvisionSession(context.Context, openmeter.ProvisionConfig, string, string) (*openmeter.SessionProvision, error) {
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.provision != nil {
+		return s.provision, nil
+	}
+	return &openmeter.SessionProvision{
+		Customer:    &openmeter.Customer{ID: "cust-1", Key: "pub-client:demo-user"},
+		CustomerKey: "pub-client:demo-user",
+		Balance: openmeter.TrialCreditBalance{
+			HasAccess:                true,
+			BalanceUsdMicros:         "5000000",
+			ConsumedUsdMicros:        "0",
+			LifetimeGrantedUsdMicros: "5000000",
+		},
+	}, nil
 }
 
 func testHandler(t *testing.T, oidc *oidcverify.Verifier) *tokenexchange.Handler {
@@ -65,7 +85,7 @@ func testHandler(t *testing.T, oidc *oidcverify.Verifier) *tokenexchange.Handler
 			ExpiresIn:   300,
 			Scope:       "sign:job",
 		}},
-		stubOpenMeter{},
+		&stubProvisioner{},
 	)
 }
 
@@ -161,6 +181,99 @@ func TestExchangeAPIKeyHappyPathWithoutM2M(t *testing.T) {
 	}
 	if result.AccessToken != "minted-jwt" {
 		t.Fatalf("access_token = %q", result.AccessToken)
+	}
+	if result.BalanceUsdMicros != "5000000" {
+		t.Fatalf("balance = %q", result.BalanceUsdMicros)
+	}
+}
+
+func TestExchangeRejectsExhaustedAllowance(t *testing.T) {
+	t.Parallel()
+	h := tokenexchange.NewHandler(
+		config.Config{
+			Auth0Audience:     "livepeer-clearinghouse",
+			SignerM2MClientID: "m2m-client",
+			SignerM2MSecret:   "m2m-secret",
+			APIKeyPrefix:      "sk_",
+		},
+		nil,
+		&apikey.Store{
+			Prefix: "sk_",
+			Demo: map[string]apikey.DemoEntry{
+				"sk_demo": {ClientID: "pub-client", UserID: "demo-user"},
+			},
+		},
+		stubMinter{response: &auth0mint.TokenResponse{AccessToken: "minted-jwt", ExpiresIn: 300, Scope: "sign:job"}},
+		&stubProvisioner{provision: &openmeter.SessionProvision{
+			CustomerKey: "pub-client:demo-user",
+			Balance: openmeter.TrialCreditBalance{
+				HasAccess:         false,
+				BalanceUsdMicros:  "0",
+				ConsumedUsdMicros: "5000000",
+			},
+		}},
+	)
+	_, err := h.Exchange(context.Background(), tokenexchange.Request{
+		PublicClientID:   "pub-client",
+		GrantType:        tokenexchange.GrantType,
+		SubjectToken:     "sk_demo",
+		SubjectTokenType: tokenexchange.SubjectAccessTokenType,
+	}, "corr")
+	if err == nil || err.(*tokenexchange.Error).Code != "insufficient_allowance" {
+		t.Fatalf("expected insufficient_allowance, got %v", err)
+	}
+}
+
+func TestExchangeRejectsClientMismatch(t *testing.T) {
+	t.Parallel()
+	h := testHandler(t, nil)
+	_, err := h.Exchange(context.Background(), tokenexchange.Request{
+		PublicClientID:   "other-client",
+		GrantType:        tokenexchange.GrantType,
+		SubjectToken:     "sk_demo",
+		SubjectTokenType: tokenexchange.SubjectAccessTokenType,
+	}, "corr")
+	if err == nil || err.(*tokenexchange.Error).Code != "invalid_grant" {
+		t.Fatalf("expected invalid_grant, got %v", err)
+	}
+}
+
+func TestExchangeRepeatMintReusesProvisioner(t *testing.T) {
+	t.Parallel()
+	provisioner := &stubProvisioner{}
+	h := tokenexchange.NewHandler(
+		config.Config{
+			Auth0Audience:     "livepeer-clearinghouse",
+			SignerM2MClientID: "m2m-client",
+			SignerM2MSecret:   "m2m-secret",
+			APIKeyPrefix:      "sk_",
+		},
+		nil,
+		&apikey.Store{
+			Prefix: "sk_",
+			Demo: map[string]apikey.DemoEntry{
+				"sk_demo": {ClientID: "pub-client", UserID: "demo-user"},
+			},
+		},
+		stubMinter{response: &auth0mint.TokenResponse{AccessToken: "minted-jwt", ExpiresIn: 300, Scope: "sign:job"}},
+		provisioner,
+	)
+	for i := 0; i < 2; i++ {
+		result, err := h.Exchange(context.Background(), tokenexchange.Request{
+			PublicClientID:   "pub-client",
+			GrantType:        tokenexchange.GrantType,
+			SubjectToken:     "sk_demo",
+			SubjectTokenType: tokenexchange.SubjectAccessTokenType,
+		}, "corr")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.AccessToken != "minted-jwt" {
+			t.Fatalf("access_token = %q", result.AccessToken)
+		}
+	}
+	if provisioner.calls != 2 {
+		t.Fatalf("provision calls = %d", provisioner.calls)
 	}
 }
 
