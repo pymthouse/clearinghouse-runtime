@@ -178,7 +178,7 @@ client_secret() {
 ensure_client_grant() {
   local client_id="$1" audience="$2" scopes_json="$3" gid body resp
   ENSURED_GRANT_CREATED=0
-  gid="$(aapi_get "client-grants?client_id=${client_id}&audience=${audience}" | jq -r '.[0].id // empty')"
+  gid="$(aapi_get "client-grants?client_id=${client_id}" | jq -r --arg a "$audience" '[.[] | select(.audience==$a) | .id] | first // empty')"
   if [ -n "$gid" ]; then
     body="$(jq -nc --argjson s "$scopes_json" '{scope: $s}')" || return 1
     aapi_patch "client-grants/$gid" "$body" >/dev/null || return 1
