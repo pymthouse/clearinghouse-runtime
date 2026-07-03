@@ -14,7 +14,9 @@ ETH_RPC_URL="${ETH_RPC_URL:-https://arb1.arbitrum.io/rpc}"
 KAFKA_BROKERS="${KAFKA_BROKERS:-kafka:9092}"
 KAFKA_GATEWAY_TOPIC="${KAFKA_GATEWAY_TOPIC:-livepeer-gateway-events}"
 
-if [ ! -f /data/.eth-password ]; then
+if [ -n "${SIGNER_ETH_PASSWORD:-}" ]; then
+  printf '%s' "$SIGNER_ETH_PASSWORD" >/data/.eth-password
+elif [ ! -f /data/.eth-password ]; then
   echo "" >/data/.eth-password
 fi
 
