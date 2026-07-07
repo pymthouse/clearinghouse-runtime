@@ -89,7 +89,9 @@ func (c *Client) listSubscriptions(ctx context.Context, customerID string) ([]su
 		return nil, err
 	}
 	q := req.URL.Query()
-	q.Set("customer_id", customerID)
+	// Konnect only honors the bracketed filter form; a bare `customer_id` param is
+	// ignored and returns unrelated subscriptions (false-positive idempotency skip).
+	q.Set("filter[customer_id]", customerID)
 	req.URL.RawQuery = q.Encode()
 	c.setHeaders(req)
 
