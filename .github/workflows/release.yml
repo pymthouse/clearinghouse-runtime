@@ -63,8 +63,8 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           case "$VERSION" in
-            *-*) npm publish --access public --no-git-checks --tag rc ;;
-            *)   npm publish --access public --no-git-checks ;;
+            *-*) npm publish --access public --no-git-checks --ignore-scripts --tag rc ;;
+            *)   npm publish --access public --no-git-checks --ignore-scripts ;;
           esac
       - name: Create GitHub Release
         env:

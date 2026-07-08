@@ -17,6 +17,7 @@
       "import": "./protocol.mjs"
     },
     "./verifiers": {
+      "types": "./verifiers.d.ts",
       "import": "./verifiers.mjs"
     },
     "./legacy-env": {
@@ -28,10 +29,10 @@
     "protocol.mjs",
     "protocol.d.ts",
     "verifiers.mjs",
+    "verifiers.d.ts",
     "legacy-env.mjs",
     "legacy-env.d.ts",
-    "keys.mjs",
-    "server.mjs"
+    "keys.mjs"
   ],
   "dependencies": {
     "jose": "^5.9.6"

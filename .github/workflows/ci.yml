@@ -37,4 +37,4 @@ jobs:
           cache-dependency-path: identity-webhook/package-lock.json
       - run: npm ci
       - run: npm test
-      - run: npm pack --dry-run
+      - run: npm pack --dry-run --ignore-scripts
