@@ -1,5 +1,5 @@
 {
-  "name": "@livepeer/clearinghouse-identity-webhook",
+  "name": "@pymthouse/clearinghouse-identity-webhook",
   "version": "0.3.0",
   "description": "API-key + OIDC identity webhook for go-livepeer remote signer (jose)",
   "type": "module",
@@ -41,6 +41,7 @@
     "access": "public"
   },
   "keywords": [
+    "pymthouse",
     "livepeer",
     "clearinghouse",
     "identity",
@@ -51,11 +52,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/livepeer/clearinghouse.git",
+    "url": "https://github.com/pymthouse/clearinghouse-runtime.git",
     "directory": "identity-webhook"
   },
   "bugs": {
-    "url": "https://github.com/livepeer/clearinghouse/issues"
+    "url": "https://github.com/pymthouse/clearinghouse-runtime/issues"
   },
-  "homepage": "https://github.com/livepeer/clearinghouse/tree/main/identity-webhook#readme"
+  "homepage": "https://github.com/pymthouse/clearinghouse-runtime/tree/main/identity-webhook#readme"
 }

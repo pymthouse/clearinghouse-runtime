@@ -1,8 +1,9 @@
-# Releasing `@livepeer/clearinghouse-identity-webhook`
+# Releasing `@pymthouse/clearinghouse-identity-webhook`
 
-Releases are triggered by pushing a semver tag (`v*.*.*`) on the `livepeer/clearinghouse`
-repository. The [release workflow](../../.github/workflows/release.yml) runs tests,
-publishes to npm via **trusted publishing** (OIDC), and creates a GitHub Release.
+Releases are triggered by pushing a semver tag (`v*.*.*`) on
+`pymthouse/clearinghouse-runtime` (fork of [livepeer/clearinghouse](https://github.com/livepeer/clearinghouse)).
+The [release workflow](../../.github/workflows/release.yml) runs tests, publishes to npm via
+**trusted publishing** (OIDC), and creates a GitHub Release.
 
 Tags apply to the **identity-webhook** npm package (monorepo subdirectory).
 
@@ -13,11 +14,11 @@ This package publishes with [npm trusted publishing](https://docs.npmjs.com/trus
 
 ### One-time setup on npmjs.com
 
-1. Create or open **@livepeer/clearinghouse-identity-webhook** on npmjs.com (under the
-   `@livepeer` org).
+1. Create or open **@pymthouse/clearinghouse-identity-webhook** on npmjs.com (under the
+   `@pymthouse` org).
 2. Open **Settings** → **Trusted publishing**.
 3. Add a **GitHub Actions** publisher:
-   - **Repository:** `livepeer/clearinghouse`
+   - **Repository:** `pymthouse/clearinghouse-runtime`
    - **Workflow filename:** `release.yml` (exact name, including `.yml`)
    - **Environment:** leave empty unless you use a GitHub Environment
 4. **Remove** the `NPM_TOKEN` repository secret if it still exists. A leftover token
@@ -27,7 +28,7 @@ This package publishes with [npm trusted publishing](https://docs.npmjs.com/trus
 ### Workflow requirements (already in `release.yml`)
 
 - `permissions.id-token: write`
-- `actions/setup-node` with `registry-url: https://registry.npmjs.org` and `scope: "@livepeer"`
+- `actions/setup-node` with `registry-url: https://registry.npmjs.org` and `scope: "@pymthouse"`
 - **No** `NODE_AUTH_TOKEN` / `NPM_TOKEN` on the publish step
 - `npm publish` (npm CLI ≥ 11.5.1), not `pnpm publish`
 

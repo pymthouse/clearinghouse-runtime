@@ -1,5 +1,9 @@
 # clearinghouse
 
+Fork of [livepeer/clearinghouse](https://github.com/livepeer/clearinghouse), maintained by
+[PymtHouse](https://github.com/pymthouse) for `@pymthouse/clearinghouse-identity-webhook` npm
+releases. See [identity-webhook/docs/RELEASING.md](identity-webhook/docs/RELEASING.md).
+
 Docker Compose stack for the clearinghouse runtime:
 **identity-webhook → Redpanda → go-livepeer remote signer → OpenMeter/Benthos collector → Konnect metering**.
 
@@ -162,7 +166,7 @@ Shared keys (`WEBHOOK_SECRET`, `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`) are liste
 
 `PORT` is set by Compose (`8090`), not `.env`. See the `identity-webhook` block in [`.env.example`](.env.example) for Auth0 vs generic OIDC examples.
 
-**npm:** `@livepeer/clearinghouse-identity-webhook` is published from this directory for embedded use (e.g. Pymthouse `POST /webhooks/remote-signer`). Releases use tag `v*.*.*` and [trusted publishing](identity-webhook/docs/RELEASING.md).
+**npm:** `@pymthouse/clearinghouse-identity-webhook` is published from this directory for embedded use (e.g. Pymthouse `POST /webhooks/remote-signer`). Releases use tag `v*.*.*` and [trusted publishing](identity-webhook/docs/RELEASING.md). Upstream: [livepeer/clearinghouse](https://github.com/livepeer/clearinghouse).
 
 Signer state (keystore, `.eth-password`, chain DB) is stored under [`remote-signer/data/`](remote-signer/data/), bind-mounted to `/data` in the container.
 
