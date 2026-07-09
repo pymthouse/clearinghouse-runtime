@@ -6,6 +6,7 @@ import {
   createLegacyWebhookConfigFromEnv,
   defaultSignerWebhookJwtAudience,
   resolveLegacyJwksUri,
+  resolveLegacyTokenExchangeBaseUrl,
 } from "./legacy-env.mjs";
 import { handleAuthorize } from "./protocol.mjs";
 
@@ -34,6 +35,22 @@ describe("resolveLegacyJwksUri", () => {
     assert.equal(
       resolveLegacyJwksUri({ JWKS_URI: "https://b.example/jwks" }),
       "https://b.example/jwks",
+    );
+  });
+});
+
+describe("resolveLegacyTokenExchangeBaseUrl", () => {
+  it("prefers OIDC_TOKEN_EXCHANGE_BASE_URL over NEXTAUTH_URL", () => {
+    assert.equal(
+      resolveLegacyTokenExchangeBaseUrl({
+        OIDC_TOKEN_EXCHANGE_BASE_URL: "https://staging.pymthouse.com",
+        NEXTAUTH_URL: "http://localhost:3000",
+      }),
+      "https://staging.pymthouse.com",
+    );
+    assert.equal(
+      resolveLegacyTokenExchangeBaseUrl({ NEXTAUTH_URL: "http://localhost:3000" }),
+      "http://localhost:3000",
     );
   });
 });
@@ -105,8 +122,9 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
     jwk.use = "sig";
     const jwks = createLocalJWKSet({ keys: [jwk] });
     const token = await new SignJWT({
-      client_id: "app-123",
+      client_id: "app_abc123",
       external_user_id: "user-456",
+      scope: "sign:job",
     })
       .setProtectedHeader({ alg: "RS256", kid: "pymthouse-test" })
       .setIssuer(ISSUER)
@@ -130,6 +148,7 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
         clientClaim: "client_id",
         subjectClaim: "external_user_id",
         subjectTypeValue: "external_user_id",
+        requiredScopes: ["sign:job"],
       }),
     };
 
@@ -148,9 +167,52 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.status, 200);
-    assert.equal(body.auth_id, "app-123:user-456");
-    assert.equal(body.identity.client_id, "app-123");
+    assert.equal(body.auth_id, "app_abc123:user-456");
+    assert.equal(body.identity.client_id, "app_abc123");
     assert.equal(body.identity.usage_subject, "user-456");
     assert.equal(body.identity.usage_subject_type, "external_user_id");
+  });
+
+  it("authorizes a composite app_*.pmth_* via mocked exchange", async () => {
+    const { token, jwks } = await setupPymthouseJwt();
+    const { createOidcVerifier } = await import("./verifiers.mjs");
+    const clientId = "app_abc123";
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      assert.ok(url.includes(`/api/v1/apps/${clientId}/oidc/token`));
+      return Response.json({ access_token: token, expires_in: 300 });
+    };
+    const config = {
+      webhookSecret: SECRET,
+      endUserAuth: createOidcVerifier({
+        jwtIssuer: ISSUER,
+        jwtAudience: defaultSignerWebhookJwtAudience(ISSUER),
+        issuer: ISSUER,
+        jwks,
+        clientClaim: "client_id",
+        subjectClaim: "external_user_id",
+        subjectTypeValue: "external_user_id",
+        requiredScopes: ["sign:job"],
+        tokenExchangeBaseUrl: "http://localhost:3000",
+        fetchImpl,
+      }),
+    };
+
+    const request = new Request("http://localhost/webhooks/remote-signer", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${SECRET}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        headers: { Authorization: [`Bearer ${clientId}.pmth_deadbeef`] },
+      }),
+    });
+
+    const response = await handleAuthorize(request, config);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 200);
+    assert.equal(body.auth_id, "app_abc123:user-456");
   });
 });

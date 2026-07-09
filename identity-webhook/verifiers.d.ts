@@ -2,6 +2,12 @@ import type { EndUserAuthVerifier } from "./protocol.js";
 
 export const IDENTITY_AUTH_MODES: readonly ["api_key", "oidc"];
 
+export function splitCompositeApiKey(
+  token: string,
+): { publicClientId: string; apiKey: string } | null;
+
+export function normalizeTokenExchangeBaseUrl(baseUrl: string): string;
+
 export function createApiKeyVerifier(options: {
   issuer: string;
   resolveApiKey: (
@@ -40,6 +46,9 @@ export function createOidcVerifier(options: {
   subjectTypeValue?: string;
   requiredScopes?: string[];
   fetchImpl?: typeof fetch;
+  tokenExchangeBaseUrl?: string;
+  exchangeM2mClientId?: string;
+  exchangeM2mClientSecret?: string;
 }): EndUserAuthVerifier;
 
 export function createEndUserVerifierFromEnv(

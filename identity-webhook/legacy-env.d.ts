@@ -6,6 +6,10 @@ export function resolveLegacyJwksUri(
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ): string | undefined;
 
+export function resolveLegacyTokenExchangeBaseUrl(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+): string | undefined;
+
 export function createLegacyOidcVerifierFromEnv(
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,
   options?: { jwtIssuer?: string },

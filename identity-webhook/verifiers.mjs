@@ -6,17 +6,83 @@
  *   { issuer, client_id, usage_subject, usage_subject_type }
  *
  * - createApiKeyVerifier: resolves `sk_…` keys via a caller-supplied lookup.
- * - createOidcVerifier:   verifies a JWT bearer against an OIDC issuer's JWKS (jose).
+ * - createOidcVerifier:   verifies a JWT bearer against an OIDC issuer's JWKS (jose),
+ *   or exchanges a composite `app_*.pmth_*` API key via RFC 8693 then verifies.
  * - createEndUserVerifierFromEnv: picks exactly one verifier via IDENTITY_AUTH_MODE.
  */
+import { createHash } from "node:crypto";
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from "jose";
 import { bearerToken, WebhookError } from "./protocol.mjs";
 import { loadApiKeyStore } from "./keys.mjs";
 
 export const IDENTITY_AUTH_MODES = ["api_key", "oidc"];
 
+const GRANT_TYPE_TOKEN_EXCHANGE =
+  "urn:ietf:params:oauth:grant-type:token-exchange";
+const SUBJECT_ACCESS_TOKEN_TYPE =
+  "urn:ietf:params:oauth:token-type:access_token";
+const COMPOSITE_CLIENT_ID_RE = /^app_[a-z0-9]+$/;
+const COMPOSITE_CACHE_MAX_TTL_SECONDS = 60;
+const ALLOWED_JWT_ALGS = ["RS256"];
+
 function nowSeconds() {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * Split `app_<clientId>.pmth_<key>` into parts. Returns null when not composite.
+ */
+export function splitCompositeApiKey(token) {
+  const trimmed = (token ?? "").trim();
+  const dot = trimmed.indexOf(".");
+  if (dot <= 0 || trimmed.indexOf(".", dot + 1) !== -1) {
+    return null;
+  }
+  const publicClientId = trimmed.slice(0, dot);
+  const apiKey = trimmed.slice(dot + 1);
+  if (!COMPOSITE_CLIENT_ID_RE.test(publicClientId)) {
+    return null;
+  }
+  if (!apiKey.startsWith("pmth_") || apiKey.startsWith("pmth_cs_")) {
+    return null;
+  }
+  return { publicClientId, apiKey };
+}
+
+function isLoopbackHost(hostname) {
+  const host = (hostname ?? "").toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
+
+/**
+ * Validate OIDC_TOKEN_EXCHANGE_BASE_URL: HTTPS required except loopback.
+ * @param {string} baseUrl
+ * @returns {string} normalized origin (no trailing slash)
+ */
+export function normalizeTokenExchangeBaseUrl(baseUrl) {
+  const trimmed = (baseUrl ?? "").trim().replace(/\/$/, "");
+  if (!trimmed) {
+    throw new Error("tokenExchangeBaseUrl is required for composite API key exchange");
+  }
+  let url;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(`tokenExchangeBaseUrl is not a valid URL: ${trimmed}`);
+  }
+  if (url.protocol === "https:") {
+    return url.origin;
+  }
+  if (url.protocol === "http:" && isLoopbackHost(url.hostname)) {
+    return url.origin;
+  }
+  throw new Error(
+    `tokenExchangeBaseUrl must be https (or http on loopback); got ${url.protocol}//${url.hostname}`,
+  );
+}
+
+function sha256Hex(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 /**
@@ -133,10 +199,204 @@ function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
   };
 }
 
+function mapVerifiedPayloadToIdentity({
+  payload,
+  identityIssuer,
+  clientClaim,
+  subjectClaim,
+  subjectTypeValue,
+  jwtAudience,
+  requiredScopes,
+}) {
+  if (requiredScopes.length) {
+    const granted = new Set(
+      String(payload.scope ?? payload.scp ?? "")
+        .split(/[\s,]+/)
+        .filter(Boolean),
+    );
+    const missing = requiredScopes.filter((s) => !granted.has(s));
+    if (missing.length) {
+      throw new WebhookError(`missing required scope(s): ${missing.join(", ")}`, {
+        status: 403,
+        code: "insufficient_scope",
+      });
+    }
+  }
+
+  const usageSubject = payload[subjectClaim];
+  if (!usageSubject) {
+    throw new WebhookError(`token missing ${subjectClaim} claim`, {
+      status: 401,
+      code: "invalid_token",
+    });
+  }
+
+  const identity = {
+    issuer: identityIssuer,
+    client_id: String(payload[clientClaim] ?? jwtAudience),
+    usage_subject: String(usageSubject),
+    usage_subject_type: subjectTypeValue,
+  };
+  const expiry = typeof payload.exp === "number" ? payload.exp : nowSeconds() + 60;
+  return { identity, expiry, raw: payload };
+}
+
+async function verifyJwtBearer({
+  token,
+  keyset,
+  jwtIssuer,
+  jwtAudience,
+  identityIssuer,
+  clientClaim,
+  subjectClaim,
+  subjectTypeValue,
+  requiredScopes,
+}) {
+  let payload;
+  try {
+    ({ payload } = await jwtVerify(token, keyset, {
+      issuer: jwtIssuer,
+      audience: jwtAudience,
+      algorithms: ALLOWED_JWT_ALGS,
+    }));
+  } catch (err) {
+    console.warn(`oidc verification failed: ${err.message}`);
+    throw new WebhookError("oidc verification failed", {
+      status: 401,
+      code: "invalid_token",
+    });
+  }
+
+  return mapVerifiedPayloadToIdentity({
+    payload,
+    identityIssuer,
+    clientClaim,
+    subjectClaim,
+    subjectTypeValue,
+    jwtAudience,
+    requiredScopes,
+  });
+}
+
+function createCompositeExchangeCache() {
+  /** @type {Map<string, { expiresAt: number, result?: any, inflight?: Promise<any> }>} */
+  const cache = new Map();
+
+  return {
+    get(key) {
+      const entry = cache.get(key);
+      if (!entry) {
+        return null;
+      }
+      if (entry.result && entry.expiresAt > nowSeconds()) {
+        return entry.result;
+      }
+      if (entry.inflight) {
+        return entry.inflight;
+      }
+      cache.delete(key);
+      return null;
+    },
+    setInflight(key, promise) {
+      cache.set(key, {
+        expiresAt: nowSeconds() + COMPOSITE_CACHE_MAX_TTL_SECONDS,
+        inflight: promise,
+      });
+    },
+    setResult(key, result, ttlSeconds) {
+      const ttl = Math.max(1, Math.min(ttlSeconds, COMPOSITE_CACHE_MAX_TTL_SECONDS));
+      cache.set(key, { expiresAt: nowSeconds() + ttl, result });
+    },
+    clear(key) {
+      cache.delete(key);
+    },
+  };
+}
+
+async function exchangeCompositeApiKey({
+  exchangeBaseUrl,
+  publicClientId,
+  apiKey,
+  jwtAudience,
+  m2mClientId,
+  m2mClientSecret,
+  fetchImpl,
+}) {
+  const url = `${exchangeBaseUrl}/api/v1/apps/${encodeURIComponent(publicClientId)}/oidc/token`;
+  const body = new URLSearchParams({
+    grant_type: GRANT_TYPE_TOKEN_EXCHANGE,
+    subject_token: apiKey,
+    subject_token_type: SUBJECT_ACCESS_TOKEN_TYPE,
+    requested_token_type: SUBJECT_ACCESS_TOKEN_TYPE,
+    audience: jwtAudience,
+  });
+
+  const headers = {
+    "content-type": "application/x-www-form-urlencoded",
+    accept: "application/json",
+  };
+  if (m2mClientId && m2mClientSecret) {
+    headers.authorization = `Basic ${Buffer.from(`${m2mClientId}:${m2mClientSecret}`).toString("base64")}`;
+  }
+
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers,
+      body: body.toString(),
+    });
+  } catch (err) {
+    const keyHashPrefix = sha256Hex(apiKey).slice(0, 12);
+    console.warn(
+      `composite api key exchange request failed key_hash=${keyHashPrefix}: ${err instanceof Error ? err.message : err}`,
+    );
+    throw new WebhookError("token exchange failed", {
+      status: 401,
+      code: "invalid_token",
+    });
+  }
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const correlationId =
+      payload && typeof payload.correlation_id === "string" ? payload.correlation_id : "";
+    const keyHashPrefix = sha256Hex(apiKey).slice(0, 12);
+    console.warn(
+      `composite api key exchange rejected status=${response.status} key_hash=${keyHashPrefix}` +
+        (correlationId ? ` correlation_id=${correlationId}` : ""),
+    );
+    throw new WebhookError("token exchange failed", {
+      status: 401,
+      code: "invalid_token",
+    });
+  }
+
+  const accessToken =
+    payload && typeof payload.access_token === "string" ? payload.access_token.trim() : "";
+  if (!accessToken) {
+    throw new WebhookError("token exchange returned no access_token", {
+      status: 401,
+      code: "invalid_token",
+    });
+  }
+  return accessToken;
+}
+
 /**
  * OIDC/JWT verifier (bring-your-own OAuth). Validates a `Bearer <jwt>` against
  * `jwtIssuer`/`jwtAudience` using the issuer's JWKS (auto-cached & refreshed by
  * jose's createRemoteJWKSet).
+ *
+ * Also accepts composite `Bearer app_<clientId>.pmth_<key>` when
+ * `tokenExchangeBaseUrl` is configured: RFC 8693 exchange at
+ * `/api/v1/apps/{clientId}/oidc/token`, then the same JWT verification path.
  *
  * JWKS resolution order:
  * 1. `jwks` (injected keyset, for tests)
@@ -154,6 +414,9 @@ export function createOidcVerifier({
   subjectTypeValue = "oidc_user",
   requiredScopes = [],
   fetchImpl,
+  tokenExchangeBaseUrl,
+  exchangeM2mClientId,
+  exchangeM2mClientSecret,
 }) {
   if (!jwtIssuer) {
     throw new Error("createOidcVerifier: jwtIssuer is required");
@@ -168,60 +431,94 @@ export function createOidcVerifier({
     fetchImpl,
   });
   const identityIssuer = issuer ?? jwtIssuer;
+  const http = fetchImpl ?? fetch;
+  const exchangeOrigin = tokenExchangeBaseUrl
+    ? normalizeTokenExchangeBaseUrl(tokenExchangeBaseUrl)
+    : null;
+  const m2mId = (exchangeM2mClientId ?? "").trim();
+  const m2mSecret = (exchangeM2mClientSecret ?? "").trim();
+  if ((m2mId && !m2mSecret) || (!m2mId && m2mSecret)) {
+    throw new Error(
+      "createOidcVerifier: exchangeM2mClientId and exchangeM2mClientSecret must both be set or both omitted",
+    );
+  }
+  const exchangeCache = createCompositeExchangeCache();
+
+  async function verifyJwt(token) {
+    return verifyJwtBearer({
+      token,
+      keyset,
+      jwtIssuer,
+      jwtAudience,
+      identityIssuer,
+      clientClaim,
+      subjectClaim,
+      subjectTypeValue,
+      requiredScopes,
+    });
+  }
+
+  async function verifyComposite(compositeToken, parts) {
+    if (!exchangeOrigin) {
+      throw new WebhookError("composite api key exchange is not configured", {
+        status: 401,
+        code: "invalid_token",
+      });
+    }
+
+    const cacheKey = sha256Hex(compositeToken);
+    const cached = exchangeCache.get(cacheKey);
+    if (cached) {
+      return cached instanceof Promise ? cached : cached;
+    }
+
+    const inflight = (async () => {
+      const accessToken = await exchangeCompositeApiKey({
+        exchangeBaseUrl: exchangeOrigin,
+        publicClientId: parts.publicClientId,
+        apiKey: parts.apiKey,
+        jwtAudience,
+        m2mClientId: m2mId,
+        m2mClientSecret: m2mSecret,
+        fetchImpl: http,
+      });
+      const verified = await verifyJwt(accessToken);
+      if (verified.identity.client_id !== parts.publicClientId) {
+        throw new WebhookError("minted token client_id does not match credential prefix", {
+          status: 401,
+          code: "invalid_token",
+        });
+      }
+      const ttl = Math.max(1, verified.expiry - nowSeconds());
+      exchangeCache.setResult(cacheKey, verified, ttl);
+      return verified;
+    })().catch((err) => {
+      exchangeCache.clear(cacheKey);
+      throw err;
+    });
+
+    exchangeCache.setInflight(cacheKey, inflight);
+    return inflight;
+  }
 
   return {
     kind: "oidc",
     verify: async ({ authorization }) => {
       const token = bearerToken(authorization);
-      if (!token || token.split(".").length !== 3) {
+      if (!token) {
         throw new WebhookError("not a JWT", { status: 401, code: "invalid_token" });
       }
 
-      let payload;
-      try {
-        ({ payload } = await jwtVerify(token, keyset, {
-          issuer: jwtIssuer,
-          audience: jwtAudience,
-        }));
-      } catch (err) {
-        console.warn(`oidc verification failed: ${err.message}`);
-        throw new WebhookError("oidc verification failed", {
-          status: 401,
-          code: "invalid_token",
-        });
+      const composite = splitCompositeApiKey(token);
+      if (composite) {
+        return verifyComposite(token, composite);
       }
 
-      if (requiredScopes.length) {
-        const granted = new Set(
-          String(payload.scope ?? payload.scp ?? "")
-            .split(/[\s,]+/)
-            .filter(Boolean),
-        );
-        const missing = requiredScopes.filter((s) => !granted.has(s));
-        if (missing.length) {
-          throw new WebhookError(`missing required scope(s): ${missing.join(", ")}`, {
-            status: 403,
-            code: "insufficient_scope",
-          });
-        }
+      if (token.split(".").length !== 3) {
+        throw new WebhookError("not a JWT", { status: 401, code: "invalid_token" });
       }
 
-      const usageSubject = payload[subjectClaim];
-      if (!usageSubject) {
-        throw new WebhookError(`token missing ${subjectClaim} claim`, {
-          status: 401,
-          code: "invalid_token",
-        });
-      }
-
-      const identity = {
-        issuer: identityIssuer,
-        client_id: String(payload[clientClaim] ?? jwtAudience),
-        usage_subject: String(usageSubject),
-        usage_subject_type: subjectTypeValue,
-      };
-      const expiry = typeof payload.exp === "number" ? payload.exp : nowSeconds() + 60;
-      return { identity, expiry, raw: payload };
+      return verifyJwt(token);
     },
   };
 }
@@ -281,5 +578,8 @@ export function createEndUserVerifierFromEnv(env) {
     requiredScopes: (envTrim(env, "OIDC_REQUIRED_SCOPES") || "")
       .split(/[\s,]+/)
       .filter(Boolean),
+    tokenExchangeBaseUrl: envTrim(env, "OIDC_TOKEN_EXCHANGE_BASE_URL") || undefined,
+    exchangeM2mClientId: envTrim(env, "OIDC_EXCHANGE_M2M_CLIENT_ID") || undefined,
+    exchangeM2mClientSecret: envTrim(env, "OIDC_EXCHANGE_M2M_CLIENT_SECRET") || undefined,
   });
 }
