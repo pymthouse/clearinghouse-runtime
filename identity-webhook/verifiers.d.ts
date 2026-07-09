@@ -24,16 +24,22 @@ export function createApiKeyVerifier(options: {
   expiryTtlSeconds?: number;
 }): EndUserAuthVerifier;
 
+export function discoverJwksUri(
+  jwtIssuer: string,
+  options?: { fetchImpl?: typeof fetch },
+): Promise<string>;
+
 export function createOidcVerifier(options: {
   jwtIssuer: string;
   jwtAudience: string;
-  jwks?: import("jose").KeyLike | Uint8Array;
+  jwks?: import("jose").JWTVerifyGetKey | import("jose").KeyLike | Uint8Array;
   jwksUri?: string;
   issuer?: string;
   clientClaim?: string;
   subjectClaim?: string;
   subjectTypeValue?: string;
   requiredScopes?: string[];
+  fetchImpl?: typeof fetch;
 }): EndUserAuthVerifier;
 
 export function createEndUserVerifierFromEnv(
