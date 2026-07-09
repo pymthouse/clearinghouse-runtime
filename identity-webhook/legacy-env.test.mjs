@@ -5,6 +5,7 @@ import {
   createLegacyOidcVerifierFromEnv,
   createLegacyWebhookConfigFromEnv,
   defaultSignerWebhookJwtAudience,
+  resolveLegacyJwksUri,
 } from "./legacy-env.mjs";
 import { handleAuthorize } from "./protocol.mjs";
 
@@ -13,6 +14,26 @@ describe("defaultSignerWebhookJwtAudience", () => {
     assert.equal(
       defaultSignerWebhookJwtAudience("https://pymthouse.com/api/v1/oidc/"),
       "https://pymthouse.com/api/v1/oidc",
+    );
+  });
+});
+
+describe("resolveLegacyJwksUri", () => {
+  it("returns undefined so createOidcVerifier uses OIDC discovery", () => {
+    assert.equal(resolveLegacyJwksUri({}), undefined);
+  });
+
+  it("prefers OIDC_JWKS_URI over JWKS_URI", () => {
+    assert.equal(
+      resolveLegacyJwksUri({
+        OIDC_JWKS_URI: "https://a.example/jwks",
+        JWKS_URI: "https://b.example/jwks",
+      }),
+      "https://a.example/jwks",
+    );
+    assert.equal(
+      resolveLegacyJwksUri({ JWKS_URI: "https://b.example/jwks" }),
+      "https://b.example/jwks",
     );
   });
 });

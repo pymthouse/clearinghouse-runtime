@@ -25,6 +25,16 @@ export function defaultSignerWebhookJwtAudience(jwtIssuer) {
 }
 
 /**
+ * Optional explicit JWKS override. When unset, createOidcVerifier resolves
+ * `jwks_uri` via OIDC Discovery (`{issuer}/.well-known/openid-configuration`).
+ *
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
+ */
+export function resolveLegacyJwksUri(env) {
+  return envTrim(env, "OIDC_JWKS_URI") || envTrim(env, "JWKS_URI") || undefined;
+}
+
+/**
  * Build an OIDC end-user verifier from legacy JWT_* / CLAIM_* env vars.
  *
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
@@ -49,7 +59,7 @@ export function createLegacyOidcVerifierFromEnv(env, options = {}) {
     requiredScopes: (envTrim(env, "OIDC_REQUIRED_SCOPES") || "")
       .split(/[\s,]+/)
       .filter(Boolean),
-    jwksUri: envTrim(env, "OIDC_JWKS_URI") || undefined,
+    jwksUri: resolveLegacyJwksUri(env),
   });
 }
 
