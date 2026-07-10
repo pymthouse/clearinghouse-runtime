@@ -37,8 +37,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Verify tag matches package.json version
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          TAG="${{ inputs.tag }}"
           VER=$(node -p "require('./package.json').version")
           EXPECTED_TAG="v${VER}"
           if [ "$TAG" != "$EXPECTED_TAG" ]; then
