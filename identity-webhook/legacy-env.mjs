@@ -35,6 +35,20 @@ export function resolveLegacyJwksUri(env) {
 }
 
 /**
+ * Base URL for RFC 8693 app-scoped token exchange (composite API keys).
+ * Prefer OIDC_TOKEN_EXCHANGE_BASE_URL; else NEXTAUTH_URL / public origin.
+ *
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
+ */
+export function resolveLegacyTokenExchangeBaseUrl(env) {
+  return (
+    envTrim(env, "OIDC_TOKEN_EXCHANGE_BASE_URL") ||
+    envTrim(env, "NEXTAUTH_URL") ||
+    undefined
+  );
+}
+
+/**
  * Build an OIDC end-user verifier from legacy JWT_* / CLAIM_* env vars.
  *
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
@@ -56,10 +70,13 @@ export function createLegacyOidcVerifierFromEnv(env, options = {}) {
     clientClaim: envOptional(env, "CLAIM_CLIENT_ID", "client_id"),
     subjectClaim: envOptional(env, "CLAIM_USAGE_SUBJECT", "external_user_id"),
     subjectTypeValue: envOptional(env, "USAGE_SUBJECT_TYPE", "external_user_id"),
-    requiredScopes: (envTrim(env, "OIDC_REQUIRED_SCOPES") || "")
+    requiredScopes: (envTrim(env, "OIDC_REQUIRED_SCOPES") || "sign:job")
       .split(/[\s,]+/)
       .filter(Boolean),
     jwksUri: resolveLegacyJwksUri(env),
+    tokenExchangeBaseUrl: resolveLegacyTokenExchangeBaseUrl(env),
+    exchangeM2mClientId: envTrim(env, "OIDC_EXCHANGE_M2M_CLIENT_ID") || undefined,
+    exchangeM2mClientSecret: envTrim(env, "OIDC_EXCHANGE_M2M_CLIENT_SECRET") || undefined,
   });
 }
 
