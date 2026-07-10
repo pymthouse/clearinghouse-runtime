@@ -10,7 +10,7 @@
  *   or exchanges a composite `app_*.pmth_*` API key via RFC 8693 then verifies.
  * - createEndUserVerifierFromEnv: picks exactly one verifier via IDENTITY_AUTH_MODE.
  */
-import { createHash } from "node:crypto";
+import { hkdfSync, randomBytes } from "node:crypto";
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from "jose";
 import { bearerToken, WebhookError } from "./protocol.mjs";
 import { loadApiKeyStore } from "./keys.mjs";
@@ -35,7 +35,7 @@ function nowSeconds() {
 export function splitCompositeApiKey(token) {
   const trimmed = (token ?? "").trim();
   const dot = trimmed.indexOf(".");
-  if (dot <= 0 || trimmed.indexOf(".", dot + 1) !== -1) {
+  if (dot <= 0 || trimmed.includes(".", dot + 1)) {
     return null;
   }
   const publicClientId = trimmed.slice(0, dot);
@@ -81,8 +81,27 @@ export function normalizeTokenExchangeBaseUrl(baseUrl) {
   );
 }
 
-function sha256Hex(value) {
-  return createHash("sha256").update(value).digest("hex");
+// Cache keys must be one-way so the plaintext credential is never retained in
+// the exchange cache. The inputs are high-entropy machine-generated keys (not
+// user-chosen passwords), so salted HKDF is the appropriate derivation; the
+// random per-process salt makes a leaked digest useless for offline
+// precomputation, and the cache is per-process anyway.
+const CACHE_KEY_SALT = randomBytes(32);
+
+function deriveCacheKey(token) {
+  return Buffer.from(
+    hkdfSync("sha256", token, CACHE_KEY_SALT, "composite-exchange-cache", 32),
+  ).toString("hex");
+}
+
+// Allowlist for values interpolated into log lines (correlation ids, client
+// ids). Anything else is dropped so response-controlled data cannot inject
+// log records.
+const LOG_SAFE_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
+function logSafe(value) {
+  const str = String(value ?? "");
+  return LOG_SAFE_RE.test(str) ? str : "";
 }
 
 /**
@@ -288,10 +307,10 @@ function createCompositeExchangeCache() {
       if (!entry) {
         return null;
       }
-      if (entry.result && entry.expiresAt > nowSeconds()) {
+      if (entry.result !== undefined && entry.expiresAt > nowSeconds()) {
         return entry.result;
       }
-      if (entry.inflight) {
+      if (entry.inflight !== undefined) {
         return entry.inflight;
       }
       cache.delete(key);
@@ -317,6 +336,7 @@ async function exchangeCompositeApiKey({
   exchangeBaseUrl,
   publicClientId,
   apiKey,
+  keyId,
   jwtAudience,
   m2mClientId,
   m2mClientSecret,
@@ -336,7 +356,8 @@ async function exchangeCompositeApiKey({
     accept: "application/json",
   };
   if (m2mClientId && m2mClientSecret) {
-    headers.authorization = `Basic ${Buffer.from(`${m2mClientId}:${m2mClientSecret}`).toString("base64")}`;
+    const basicCredentials = Buffer.from(`${m2mClientId}:${m2mClientSecret}`).toString("base64");
+    headers.authorization = `Basic ${basicCredentials}`;
   }
 
   let response;
@@ -347,9 +368,8 @@ async function exchangeCompositeApiKey({
       body: body.toString(),
     });
   } catch (err) {
-    const keyHashPrefix = sha256Hex(apiKey).slice(0, 12);
     console.warn(
-      `composite api key exchange request failed key_hash=${keyHashPrefix}: ${err instanceof Error ? err.message : err}`,
+      `composite api key exchange request failed client_id=${logSafe(publicClientId)} key_id=${keyId}: ${err instanceof Error ? err.message : err}`,
     );
     throw new WebhookError("token exchange failed", {
       status: 401,
@@ -365,11 +385,9 @@ async function exchangeCompositeApiKey({
   }
 
   if (!response.ok) {
-    const correlationId =
-      payload && typeof payload.correlation_id === "string" ? payload.correlation_id : "";
-    const keyHashPrefix = sha256Hex(apiKey).slice(0, 12);
+    const correlationId = logSafe(payload?.correlation_id);
     console.warn(
-      `composite api key exchange rejected status=${response.status} key_hash=${keyHashPrefix}` +
+      `composite api key exchange rejected status=${response.status} client_id=${logSafe(publicClientId)} key_id=${keyId}` +
         (correlationId ? ` correlation_id=${correlationId}` : ""),
     );
     throw new WebhookError("token exchange failed", {
@@ -466,10 +484,10 @@ export function createOidcVerifier({
       });
     }
 
-    const cacheKey = sha256Hex(compositeToken);
+    const cacheKey = deriveCacheKey(compositeToken);
     const cached = exchangeCache.get(cacheKey);
-    if (cached) {
-      return cached instanceof Promise ? cached : cached;
+    if (cached !== null) {
+      return cached;
     }
 
     const inflight = (async () => {
@@ -477,6 +495,7 @@ export function createOidcVerifier({
         exchangeBaseUrl: exchangeOrigin,
         publicClientId: parts.publicClientId,
         apiKey: parts.apiKey,
+        keyId: cacheKey.slice(0, 12),
         jwtAudience,
         m2mClientId: m2mId,
         m2mClientSecret: m2mSecret,
