@@ -9,7 +9,7 @@
  * - createOidcVerifier:   verifies a JWT bearer against an OIDC issuer's JWKS (jose).
  * - createEndUserVerifierFromEnv: picks exactly one verifier via IDENTITY_AUTH_MODE.
  */
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from "jose";
 import { bearerToken, WebhookError } from "./protocol.mjs";
 import { loadApiKeyStore } from "./keys.mjs";
 
@@ -60,9 +60,113 @@ export function createApiKeyVerifier({
 }
 
 /**
+ * Resolve `jwks_uri` via OIDC Discovery (issuer-relative
+ * `/.well-known/openid-configuration`), matching oauth4webapi / builder-sdk.
+ *
+ * Example: issuer `https://staging.pymthouse.com/api/v1/oidc` →
+ * discovery advertises `jwks_uri` `https://staging.pymthouse.com/api/v1/oidc/jwks`.
+ *
+ * @param {string} jwtIssuer
+ * @param {{ fetchImpl?: typeof fetch }} [options]
+ * @returns {Promise<string>}
+ */
+function normalizeIssuer(issuer) {
+  return String(issuer ?? "").replace(/\/$/, "");
+}
+
+export async function discoverJwksUri(jwtIssuer, options = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const base = normalizeIssuer(jwtIssuer);
+  const url = `${base}/.well-known/openid-configuration`;
+  let response;
+  try {
+    response = await fetchImpl(url);
+  } catch (err) {
+    throw new Error(
+      `OIDC discovery request failed (${url}): ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`OIDC discovery failed: expected 200 from ${url}, got ${response.status}`);
+  }
+  let doc;
+  try {
+    doc = await response.json();
+  } catch {
+    throw new Error(`OIDC discovery response is not JSON (${url})`);
+  }
+  if (!doc || typeof doc.issuer !== "string" || !doc.issuer.trim()) {
+    throw new Error(`OIDC discovery document missing issuer (${url})`);
+  }
+  if (normalizeIssuer(doc.issuer) !== base) {
+    throw new Error(
+      `OIDC discovery issuer mismatch (${url}): expected ${base}, got ${doc.issuer.trim()}`,
+    );
+  }
+  if (typeof doc.jwks_uri !== "string" || !doc.jwks_uri.trim()) {
+    throw new Error(`OIDC discovery document missing jwks_uri (${url})`);
+  }
+  return doc.jwks_uri.trim();
+}
+
+/**
+ * Build a jose key resolver: explicit `jwks`, explicit `jwksUri`, or lazy OIDC
+ * discovery of `jwks_uri` from `{issuer}/.well-known/openid-configuration`.
+ *
+ * When `fetchImpl` is set (tests / custom HTTP), JWKS is loaded through it into
+ * a local keyset. Otherwise jose's createRemoteJWKSet fetches and caches.
+ */
+function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
+  if (jwks) {
+    return jwks;
+  }
+
+  let remote;
+  let resolving;
+  return async (protectedHeader, token) => {
+    if (!remote) {
+      resolving ??= (async () => {
+        const uri = jwksUri ?? (await discoverJwksUri(jwtIssuer, { fetchImpl }));
+        if (fetchImpl) {
+          let response;
+          try {
+            response = await fetchImpl(uri);
+          } catch (err) {
+            throw new Error(
+              `JWKS request failed (${uri}): ${err instanceof Error ? err.message : err}`,
+            );
+          }
+          if (!response.ok) {
+            throw new Error(
+              `Expected 200 OK from the JSON Web Key Set HTTP response (${uri}) [${response.status}]`,
+            );
+          }
+          let doc;
+          try {
+            doc = await response.json();
+          } catch {
+            throw new Error(`JWKS response is not JSON (${uri})`);
+          }
+          return createLocalJWKSet(doc);
+        }
+        return createRemoteJWKSet(new URL(uri));
+      })();
+      remote = await resolving;
+    }
+    return remote(protectedHeader, token);
+  };
+}
+
+/**
  * OIDC/JWT verifier (bring-your-own OAuth). Validates a `Bearer <jwt>` against
- * `jwtIssuer`/`jwtAudience` using the issuer's JWKS (auto-cached & refreshed by
- * jose's createRemoteJWKSet). `jwks` may be injected for testing.
+ * `jwtIssuer`/`jwtAudience` using the issuer's JWKS. By default jose's
+ * `createRemoteJWKSet` fetches, caches, and refreshes keys. When `fetchImpl` is
+ * provided (tests / custom HTTP), JWKS is fetched once into a local keyset.
+ *
+ * JWKS resolution order:
+ * 1. `jwks` (injected keyset, for tests)
+ * 2. `jwksUri` (explicit override, e.g. OIDC_JWKS_URI)
+ * 3. OIDC Discovery: `{jwtIssuer}/.well-known/openid-configuration` → `jwks_uri`
  */
 export function createOidcVerifier({
   jwtIssuer,
@@ -74,6 +178,7 @@ export function createOidcVerifier({
   subjectClaim = "sub",
   subjectTypeValue = "oidc_user",
   requiredScopes = [],
+  fetchImpl,
 }) {
   if (!jwtIssuer) {
     throw new Error("createOidcVerifier: jwtIssuer is required");
@@ -81,11 +186,12 @@ export function createOidcVerifier({
   if (!jwtAudience) {
     throw new Error("createOidcVerifier: jwtAudience is required");
   }
-  const keyset =
-    jwks ??
-    createRemoteJWKSet(
-      new URL(jwksUri ?? `${jwtIssuer.replace(/\/$/, "")}/.well-known/jwks.json`),
-    );
+  const keyset = createOidcKeyResolver({
+    jwks,
+    jwksUri,
+    jwtIssuer,
+    fetchImpl,
+  });
   const identityIssuer = issuer ?? jwtIssuer;
 
   return {

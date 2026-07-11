@@ -5,9 +5,146 @@ import {
   createApiKeyVerifier,
   createEndUserVerifierFromEnv,
   createOidcVerifier,
+  discoverJwksUri,
 } from "./verifiers.mjs";
 
 const ISSUER = "http://identity-webhook:8090";
+
+describe("discoverJwksUri", () => {
+  it("reads jwks_uri from issuer-relative openid-configuration", async () => {
+    const seen = [];
+    const fetchImpl = async (input) => {
+      seen.push(String(input));
+      return Response.json({
+        issuer: "https://staging.pymthouse.com/api/v1/oidc",
+        jwks_uri: "https://staging.pymthouse.com/api/v1/oidc/jwks",
+      });
+    };
+    const uri = await discoverJwksUri("https://staging.pymthouse.com/api/v1/oidc", {
+      fetchImpl,
+    });
+    assert.equal(uri, "https://staging.pymthouse.com/api/v1/oidc/jwks");
+    assert.deepEqual(seen, [
+      "https://staging.pymthouse.com/api/v1/oidc/.well-known/openid-configuration",
+    ]);
+  });
+
+  it("rejects discovery without jwks_uri", async () => {
+    await assert.rejects(
+      () =>
+        discoverJwksUri("https://idp.test", {
+          fetchImpl: async () => Response.json({ issuer: "https://idp.test" }),
+        }),
+      /missing jwks_uri/,
+    );
+  });
+
+  it("rejects discovery when issuer does not match jwtIssuer", async () => {
+    await assert.rejects(
+      () =>
+        discoverJwksUri("https://idp.test/api/v1/oidc", {
+          fetchImpl: async () =>
+            Response.json({
+              issuer: "https://other.example/oidc",
+              jwks_uri: "https://other.example/oidc/jwks",
+            }),
+        }),
+      /issuer mismatch/,
+    );
+  });
+
+  it("accepts discovery issuer that differs only by trailing slash", async () => {
+    const uri = await discoverJwksUri("https://idp.test/api/v1/oidc/", {
+      fetchImpl: async () =>
+        Response.json({
+          issuer: "https://idp.test/api/v1/oidc",
+          jwks_uri: "https://idp.test/api/v1/oidc/jwks",
+        }),
+    });
+    assert.equal(uri, "https://idp.test/api/v1/oidc/jwks");
+  });
+});
+
+describe("createOidcVerifier discovery", () => {
+  it("discovers JWKS via openid-configuration then verifies", async () => {
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const jwk = await exportJWK(publicKey);
+    jwk.kid = "disc-key";
+    jwk.alg = "RS256";
+    jwk.use = "sig";
+    const issuer = "https://idp.test/api/v1/oidc";
+    const jwksUri = `${issuer}/jwks`;
+    const seen = [];
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return Response.json({ issuer, jwks_uri: jwksUri });
+      }
+      if (url.startsWith(jwksUri)) {
+        return Response.json({ keys: [jwk] });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const token = await new SignJWT({ sub: "user-b", azp: "app-b" })
+      .setProtectedHeader({ alg: "RS256", kid: "disc-key" })
+      .setIssuer(issuer)
+      .setAudience("clearinghouse")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+
+    const verifier = createOidcVerifier({
+      jwtIssuer: issuer,
+      jwtAudience: "clearinghouse",
+      fetchImpl,
+    });
+    const { identity } = await verifier.verify({ authorization: `Bearer ${token}` });
+    assert.equal(identity.usage_subject, "user-b");
+    assert.ok(seen.some((u) => u.endsWith("/.well-known/openid-configuration")));
+    assert.ok(seen.some((u) => u.startsWith(jwksUri)));
+    assert.ok(!seen.some((u) => u.includes(".well-known/jwks.json")));
+  });
+
+  it("wraps JWKS fetch failures with the JWKS URL", async () => {
+    const issuer = "https://idp.test/api/v1/oidc";
+    const jwksUri = `${issuer}/jwks`;
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return Response.json({ issuer, jwks_uri: jwksUri });
+      }
+      if (url.startsWith(jwksUri)) {
+        throw new Error("network down");
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const verifier = createOidcVerifier({
+        jwtIssuer: issuer,
+        jwtAudience: "clearinghouse",
+        fetchImpl,
+      });
+      await assert.rejects(
+        () => verifier.verify({ authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.e30.sig" }),
+        /oidc verification failed/,
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.ok(
+      warnings.some((w) =>
+        w.includes(`JWKS request failed (${jwksUri}): network down`),
+      ),
+      `expected JWKS URL in warn log, got: ${JSON.stringify(warnings)}`,
+    );
+  });
+});
 
 describe("createApiKeyVerifier", () => {
   const store = new Map([
