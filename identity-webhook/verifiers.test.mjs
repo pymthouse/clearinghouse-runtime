@@ -274,10 +274,29 @@ describe("createEndUserVerifierFromEnv", () => {
     assert.equal(identity.usage_subject, "demo-user");
   });
 
-  it("rejects oidc mode without OIDC_ISSUER", () => {
+  it("oidc mode accepts IDENTITY_ISSUER alone (OIDC_ISSUER optional alias)", () => {
+    const verifier = createEndUserVerifierFromEnv({
+      IDENTITY_ISSUER: ISSUER,
+      IDENTITY_AUTH_MODE: "oidc",
+    });
+    assert.equal(verifier.kind, "oidc");
+  });
+
+  it("oidc mode accepts OIDC_ISSUER alone as IDENTITY_ISSUER alias", () => {
+    const verifier = createEndUserVerifierFromEnv({
+      OIDC_ISSUER: "https://idp.test/",
+      IDENTITY_AUTH_MODE: "oidc",
+    });
+    assert.equal(verifier.kind, "oidc");
+  });
+
+  it("rejects oidc mode without IDENTITY_ISSUER or OIDC_ISSUER", () => {
     assert.throws(
-      () => createEndUserVerifierFromEnv({ ...apiKeyEnv, IDENTITY_AUTH_MODE: "oidc" }),
-      /oidc mode requires OIDC_ISSUER/,
+      () =>
+        createEndUserVerifierFromEnv({
+          IDENTITY_AUTH_MODE: "oidc",
+        }),
+      /IDENTITY_ISSUER is required/,
     );
   });
 
