@@ -18,16 +18,16 @@ describe("discoverJwksUri", () => {
     const fetchImpl = async (input) => {
       seen.push(String(input));
       return Response.json({
-        issuer: "https://staging.pymthouse.com/api/v1/oidc",
-        jwks_uri: "https://staging.pymthouse.com/api/v1/oidc/jwks",
+        issuer: "https://issuer.example/api/v1/oidc",
+        jwks_uri: "https://issuer.example/api/v1/oidc/jwks",
       });
     };
-    const uri = await discoverJwksUri("https://staging.pymthouse.com/api/v1/oidc", {
+    const uri = await discoverJwksUri("https://issuer.example/api/v1/oidc", {
       fetchImpl,
     });
-    assert.equal(uri, "https://staging.pymthouse.com/api/v1/oidc/jwks");
+    assert.equal(uri, "https://issuer.example/api/v1/oidc/jwks");
     assert.deepEqual(seen, [
-      "https://staging.pymthouse.com/api/v1/oidc/.well-known/openid-configuration",
+      "https://issuer.example/api/v1/oidc/.well-known/openid-configuration",
     ]);
   });
 
@@ -39,6 +39,31 @@ describe("discoverJwksUri", () => {
         }),
       /missing jwks_uri/,
     );
+  });
+
+  it("rejects discovery when issuer does not match jwtIssuer", async () => {
+    await assert.rejects(
+      () =>
+        discoverJwksUri("https://idp.test/api/v1/oidc", {
+          fetchImpl: async () =>
+            Response.json({
+              issuer: "https://other.example/oidc",
+              jwks_uri: "https://other.example/oidc/jwks",
+            }),
+        }),
+      /issuer mismatch/,
+    );
+  });
+
+  it("accepts discovery issuer that differs only by trailing slash", async () => {
+    const uri = await discoverJwksUri("https://idp.test/api/v1/oidc/", {
+      fetchImpl: async () =>
+        Response.json({
+          issuer: "https://idp.test/api/v1/oidc",
+          jwks_uri: "https://idp.test/api/v1/oidc/jwks",
+        }),
+    });
+    assert.equal(uri, "https://idp.test/api/v1/oidc/jwks");
   });
 });
 
@@ -82,6 +107,44 @@ describe("createOidcVerifier discovery", () => {
     assert.ok(seen.some((u) => u.endsWith("/.well-known/openid-configuration")));
     assert.ok(seen.some((u) => u.startsWith(jwksUri)));
     assert.ok(!seen.some((u) => u.includes(".well-known/jwks.json")));
+  });
+
+  it("wraps JWKS fetch failures with the JWKS URL", async () => {
+    const issuer = "https://idp.test/api/v1/oidc";
+    const jwksUri = `${issuer}/jwks`;
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return Response.json({ issuer, jwks_uri: jwksUri });
+      }
+      if (url.startsWith(jwksUri)) {
+        throw new Error("network down");
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const verifier = createOidcVerifier({
+        jwtIssuer: issuer,
+        jwtAudience: "clearinghouse",
+        fetchImpl,
+      });
+      await assert.rejects(
+        () => verifier.verify({ authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.e30.sig" }),
+        /oidc verification failed/,
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.ok(
+      warnings.some((w) =>
+        w.includes(`JWKS request failed (${jwksUri}): network down`),
+      ),
+      `expected JWKS URL in warn log, got: ${JSON.stringify(warnings)}`,
+    );
   });
 });
 
@@ -251,7 +314,7 @@ describe("createEndUserVerifierFromEnv", () => {
     );
   });
 
-  it("oidc mode rejects sk_ / bare pmth_* / pmth_cs_*", async () => {
+  it("oidc mode rejects bare secrets and non-composite tokens", async () => {
     const verifier = createEndUserVerifierFromEnv({
       IDENTITY_ISSUER: ISSUER,
       IDENTITY_AUTH_MODE: "oidc",
@@ -266,37 +329,48 @@ describe("createEndUserVerifierFromEnv", () => {
       /not a JWT/,
     );
     await assert.rejects(
-      () => verifier.verify({ authorization: "Bearer pmth_barekey" }),
+      () => verifier.verify({ authorization: "Bearer deadbeefsecret" }),
       /not a JWT/,
     );
     await assert.rejects(
-      () => verifier.verify({ authorization: "Bearer app_abc.pmth_cs_secret" }),
+      () =>
+        verifier.verify({
+          authorization: "Bearer app_3b386c81a1db1169fd2c3986_cs_secret",
+        }),
       /not a JWT/,
     );
   });
 });
 
 describe("splitCompositeApiKey / normalizeTokenExchangeBaseUrl", () => {
+  const clientId = "app_3b386c81a1db1169fd2c3986";
+
   it("parses composite credentials", () => {
-    assert.deepEqual(splitCompositeApiKey("app_abc123.pmth_deadbeef"), {
-      publicClientId: "app_abc123",
-      apiKey: "pmth_deadbeef",
+    assert.deepEqual(splitCompositeApiKey(`${clientId}_deadbeef`), {
+      publicClientId: clientId,
+      apiKey: "deadbeef",
     });
-    assert.equal(splitCompositeApiKey("pmth_deadbeef"), null);
-    assert.equal(splitCompositeApiKey("app_abc:pmth_x"), null);
+    assert.deepEqual(splitCompositeApiKey(`${clientId}_key_deadbeef`), {
+      publicClientId: clientId,
+      apiKey: "key_deadbeef",
+    });
+    assert.equal(splitCompositeApiKey("deadbeef"), null);
+    assert.equal(splitCompositeApiKey(`${clientId}.deadbeef`), null);
+    assert.equal(splitCompositeApiKey(`${clientId}_cs_secret`), null);
+    assert.equal(splitCompositeApiKey("app_abc_short"), null);
   });
 
   it("requires https except loopback", () => {
     assert.equal(
-      normalizeTokenExchangeBaseUrl("https://staging.pymthouse.com/"),
-      "https://staging.pymthouse.com",
+      normalizeTokenExchangeBaseUrl("https://billing.example.com/"),
+      "https://billing.example.com",
     );
     assert.equal(
       normalizeTokenExchangeBaseUrl("http://localhost:3000"),
       "http://localhost:3000",
     );
     assert.throws(
-      () => normalizeTokenExchangeBaseUrl("http://staging.pymthouse.com"),
+      () => normalizeTokenExchangeBaseUrl("http://billing.example.com"),
       /must be https/,
     );
   });
@@ -313,11 +387,12 @@ describe("createOidcVerifier composite API key exchange", () => {
     return { privateKey, jwks };
   }
 
-  it("exchanges app_*.pmth_* then verifies the minted JWT", async () => {
+  it("exchanges app_*_* then verifies the minted JWT", async () => {
     const { privateKey, jwks } = await setup();
     const issuer = "https://idp.test/api/v1/oidc";
     const audience = issuer;
-    const clientId = "app_abc123";
+    const clientId = "app_3b386c81a1db1169fd2c3986";
+    const composite = `${clientId}_deadbeef`;
     const minted = await new SignJWT({
       client_id: clientId,
       external_user_id: "user-1",
@@ -337,7 +412,7 @@ describe("createOidcVerifier composite API key exchange", () => {
       assert.equal(url, `https://billing.test/api/v1/apps/${clientId}/oidc/token`);
       assert.equal(init?.method, "POST");
       const form = new URLSearchParams(String(init?.body ?? ""));
-      assert.equal(form.get("subject_token"), "pmth_deadbeef");
+      assert.equal(form.get("subject_token"), "deadbeef");
       assert.equal(
         form.get("grant_type"),
         "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -358,19 +433,20 @@ describe("createOidcVerifier composite API key exchange", () => {
     });
 
     const { identity } = await verifier.verify({
-      authorization: `Bearer ${clientId}.pmth_deadbeef`,
+      authorization: `Bearer ${composite}`,
     });
     assert.equal(identity.client_id, clientId);
     assert.equal(identity.usage_subject, "user-1");
     assert.equal(seen.length, 1);
 
     // Second call hits cache — no extra exchange.
-    await verifier.verify({ authorization: `Bearer ${clientId}.pmth_deadbeef` });
+    await verifier.verify({ authorization: `Bearer ${composite}` });
     assert.equal(seen.length, 1);
   });
 
   it("rejects when exchange returns 401", async () => {
     const { jwks } = await setup();
+    const clientId = "app_3b386c81a1db1169fd2c3986";
     const fetchImpl = async () =>
       Response.json({ error: "invalid_grant", correlation_id: "c1" }, { status: 401 });
     const verifier = createOidcVerifier({
@@ -381,7 +457,7 @@ describe("createOidcVerifier composite API key exchange", () => {
       fetchImpl,
     });
     await assert.rejects(
-      () => verifier.verify({ authorization: "Bearer app_abc.pmth_bad" }),
+      () => verifier.verify({ authorization: `Bearer ${clientId}_bad` }),
       /token exchange failed/,
     );
   });
