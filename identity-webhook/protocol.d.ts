@@ -72,9 +72,29 @@ export type EndUserAuthVerifier = {
   }>;
 };
 
+export type BalanceCheckContext = {
+  identity: UsageIdentity;
+  expiry: number;
+  raw?: unknown;
+  payload: unknown;
+  request: Request;
+};
+
+export type BalanceCheckResult = { expiry?: number } | void;
+
+/**
+ * Live balance/credit gate invoked after identity verification. Throw a
+ * `WebhookError` (e.g. status 483 `insufficient_balance`) to reject; optionally
+ * return `{ expiry }` to cap how long go-livepeer caches this authorization.
+ */
+export type BalanceCheck = (
+  ctx: BalanceCheckContext,
+) => Promise<BalanceCheckResult> | BalanceCheckResult;
+
 export type RemoteSignerWebhookConfig = {
   webhookSecret: string;
   endUserAuth: EndUserAuthVerifier;
+  checkBalance?: BalanceCheck;
 };
 
 export function handleAuthorize(
