@@ -13,8 +13,8 @@
  * integer number, or integer string.
  *
  * Example:
- *   import { handleAuthorize } from "@livepeer/clearinghouse-identity-webhook/protocol";
- *   import { createBalanceGate } from "@livepeer/clearinghouse-identity-webhook/balance-gate";
+ *   import { handleAuthorize } from "@pymthouse/clearinghouse-identity-webhook/protocol";
+ *   import { createBalanceGate } from "@pymthouse/clearinghouse-identity-webhook/balance-gate";
  *
  *   const checkBalance = createBalanceGate({
  *     getBalanceUsdMicros: async (identity) =>
