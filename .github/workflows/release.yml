@@ -2,7 +2,7 @@
 # repo, or npm returns E422 when verifying the sigstore bundle.
 #
 # npm auth: Trusted Publishing (OIDC). Configure on npmjs.com for
-# pymthouse/clearinghouse-runtime and workflow filename `release.yml`. Do not set
+# pymthouse/clearinghouse and workflow filename `release.yml`. Do not set
 # secrets.NPM_TOKEN on publish — it overrides OIDC and can cause EOTP.
 # See identity-webhook/docs/RELEASING.md.
 name: release

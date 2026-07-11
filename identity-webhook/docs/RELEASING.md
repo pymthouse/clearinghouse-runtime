@@ -1,7 +1,7 @@
 # Releasing `@pymthouse/clearinghouse-identity-webhook`
 
 Releases are triggered by pushing a semver tag (`v*.*.*`) on
-`pymthouse/clearinghouse-runtime` (fork of [livepeer/clearinghouse](https://github.com/livepeer/clearinghouse)).
+`pymthouse/clearinghouse` (fork of [livepeer/clearinghouse](https://github.com/livepeer/clearinghouse)).
 The [release workflow](../../.github/workflows/release.yml) runs tests, publishes to npm via
 **trusted publishing** (OIDC), and creates a GitHub Release.
 
@@ -18,7 +18,7 @@ This package publishes with [npm trusted publishing](https://docs.npmjs.com/trus
    `@pymthouse` org).
 2. Open **Settings** → **Trusted publishing**.
 3. Add a **GitHub Actions** publisher:
-   - **Repository:** `pymthouse/clearinghouse-runtime`
+   - **Repository:** `pymthouse/clearinghouse`
    - **Workflow filename:** `release.yml` (exact name, including `.yml`)
    - **Environment:** leave empty unless you use a GitHub Environment
 4. **Remove** the `NPM_TOKEN` repository secret if it still exists. A leftover token

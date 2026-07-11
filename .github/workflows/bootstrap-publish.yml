@@ -5,7 +5,7 @@
 #
 # Token: npmjs.com → Access Tokens → Granular → Read and Write on @pymthouse
 #        → enable "Bypass two-factor authentication for automation"
-# Secret: gh secret set NPM_TOKEN -R pymthouse/clearinghouse-runtime
+# Secret: gh secret set NPM_TOKEN -R pymthouse/clearinghouse
 name: bootstrap-publish
 
 on:
