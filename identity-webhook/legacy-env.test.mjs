@@ -173,10 +173,10 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
     assert.equal(body.identity.usage_subject_type, "external_user_id");
   });
 
-  it("authorizes a composite app_*.pmth_* via mocked exchange", async () => {
+  it("authorizes a composite app_*_* via mocked exchange", async () => {
     const { token, jwks } = await setupPymthouseJwt();
     const { createOidcVerifier } = await import("./verifiers.mjs");
-    const clientId = "app_abc123";
+    const clientId = "app_abc123abc123abc123abcdef";
     const fetchImpl = async (input) => {
       const url = String(input);
       assert.ok(url.includes(`/api/v1/apps/${clientId}/oidc/token`));
@@ -205,7 +205,9 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        headers: { Authorization: [`Bearer ${clientId}.pmth_deadbeef`] },
+        headers: {
+          Authorization: [`Bearer ${clientId}_pmth_deadbeef`],
+        },
       }),
     });
 
