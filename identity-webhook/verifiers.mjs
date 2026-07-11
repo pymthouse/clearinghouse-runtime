@@ -578,11 +578,16 @@ function envOptional(env, name, fallback) {
 /**
  * Build the end-user verifier from env. IDENTITY_AUTH_MODE selects exactly one
  * verifier — no fallback between OIDC and API-key paths.
+ *
+ * Issuer consolidation: IDENTITY_ISSUER is canonical; OIDC_ISSUER is an optional
+ * legacy alias (either may be set). OIDC_AUDIENCE defaults to the JWT issuer.
+ * OIDC_TOKEN_EXCHANGE_BASE_URL defaults from NEXTAUTH_URL when unset.
  */
 export function createEndUserVerifierFromEnv(env) {
-  const issuer = envTrim(env, "IDENTITY_ISSUER");
+  const jwtIssuer = envTrim(env, "OIDC_ISSUER") || envTrim(env, "IDENTITY_ISSUER");
+  const issuer = envTrim(env, "IDENTITY_ISSUER") || jwtIssuer;
   if (!issuer) {
-    throw new Error("IDENTITY_ISSUER is required");
+    throw new Error("IDENTITY_ISSUER is required (OIDC_ISSUER accepted as alias)");
   }
 
   const mode = envTrim(env, "IDENTITY_AUTH_MODE");
@@ -604,16 +609,15 @@ export function createEndUserVerifierFromEnv(env) {
     });
   }
 
-  if (!envTrim(env, "OIDC_ISSUER")) {
-    throw new Error("oidc mode requires OIDC_ISSUER");
-  }
-  if (!envTrim(env, "OIDC_AUDIENCE")) {
-    throw new Error("oidc mode requires OIDC_AUDIENCE");
-  }
+  const jwtAudience = envTrim(env, "OIDC_AUDIENCE") || jwtIssuer;
+  const tokenExchangeBaseUrl =
+    envTrim(env, "OIDC_TOKEN_EXCHANGE_BASE_URL") ||
+    envTrim(env, "NEXTAUTH_URL") ||
+    undefined;
 
   return createOidcVerifier({
-    jwtIssuer: envTrim(env, "OIDC_ISSUER"),
-    jwtAudience: envTrim(env, "OIDC_AUDIENCE"),
+    jwtIssuer,
+    jwtAudience,
     jwksUri: envTrim(env, "OIDC_JWKS_URI") || undefined,
     issuer,
     clientClaim: envOptional(env, "OIDC_CLIENT_CLAIM", "azp"),
@@ -622,7 +626,7 @@ export function createEndUserVerifierFromEnv(env) {
     requiredScopes: (envTrim(env, "OIDC_REQUIRED_SCOPES") || "")
       .split(/[\s,]+/)
       .filter(Boolean),
-    tokenExchangeBaseUrl: envTrim(env, "OIDC_TOKEN_EXCHANGE_BASE_URL") || undefined,
+    tokenExchangeBaseUrl,
     exchangeM2mClientId: envTrim(env, "OIDC_EXCHANGE_M2M_CLIENT_ID") || undefined,
     exchangeM2mClientSecret: envTrim(env, "OIDC_EXCHANGE_M2M_CLIENT_SECRET") || undefined,
   });
