@@ -1,4 +1,8 @@
-import type { EndUserAuthVerifier, RemoteSignerWebhookConfig } from "./protocol.js";
+import type {
+  BalanceCheck,
+  EndUserAuthVerifier,
+  RemoteSignerWebhookConfig,
+} from "./protocol.js";
 
 export function defaultSignerWebhookJwtAudience(jwtIssuer: string): string;
 
@@ -17,5 +21,5 @@ export function createLegacyOidcVerifierFromEnv(
 
 export function createLegacyWebhookConfigFromEnv(
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,
-  options?: { jwtIssuer?: string },
+  options?: { jwtIssuer?: string; checkBalance?: BalanceCheck },
 ): RemoteSignerWebhookConfig;

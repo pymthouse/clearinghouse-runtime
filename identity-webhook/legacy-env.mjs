@@ -84,7 +84,9 @@ export function createLegacyOidcVerifierFromEnv(env, options = {}) {
  * Full webhook config for handleAuthorize from legacy env.
  *
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
- * @param {{ jwtIssuer?: string }} [options]
+ * @param {{ jwtIssuer?: string, checkBalance?: import("./protocol.js").BalanceCheck }} [options]
+ *   `checkBalance` is passed through so consumers can enforce a live credit gate
+ *   (see ./balance-gate.mjs) without re-implementing verifier wiring.
  */
 export function createLegacyWebhookConfigFromEnv(env, options = {}) {
   const webhookSecret = envTrim(env, "WEBHOOK_SECRET");
@@ -92,8 +94,12 @@ export function createLegacyWebhookConfigFromEnv(env, options = {}) {
     throw new Error("WEBHOOK_SECRET is required");
   }
 
-  return {
+  const config = {
     webhookSecret,
     endUserAuth: createLegacyOidcVerifierFromEnv(env, options),
   };
+  if (typeof options.checkBalance === "function") {
+    config.checkBalance = options.checkBalance;
+  }
+  return config;
 }

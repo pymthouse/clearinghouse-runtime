@@ -1,6 +1,6 @@
 {
   "name": "@pymthouse/clearinghouse-identity-webhook",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "API-key + OIDC identity webhook for go-livepeer remote signer (jose)",
   "type": "module",
   "license": "MIT",
@@ -23,6 +23,10 @@
     "./legacy-env": {
       "types": "./legacy-env.d.ts",
       "import": "./legacy-env.mjs"
+    },
+    "./balance-gate": {
+      "types": "./balance-gate.d.ts",
+      "import": "./balance-gate.mjs"
     }
   },
   "files": [
@@ -32,6 +36,8 @@
     "verifiers.d.ts",
     "legacy-env.mjs",
     "legacy-env.d.ts",
+    "balance-gate.mjs",
+    "balance-gate.d.ts",
     "keys.mjs"
   ],
   "dependencies": {
