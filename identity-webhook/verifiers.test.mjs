@@ -9,8 +9,17 @@ import {
   normalizeTokenExchangeBaseUrl,
   splitCompositeApiKey,
 } from "./verifiers.mjs";
+import { handleAuthorize } from "./protocol.mjs";
 
 const ISSUER = "http://identity-webhook:8090";
+
+function stripTrailingSlashes(value) {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
 
 describe("discoverJwksUri", () => {
   it("reads jwks_uri from issuer-relative openid-configuration", async () => {
@@ -384,5 +393,143 @@ describe("createOidcVerifier composite API key exchange", () => {
       () => verifier.verify({ authorization: "Bearer app_abc.pmth_bad" }),
       /token exchange failed/,
     );
+  });
+});
+
+describe("pymthouse embedded flow (handleAuthorize + createOidcVerifier)", () => {
+  const PYMTHOUSE_ISSUER = "https://pymthouse.com/api/v1/oidc";
+  const SECRET = "dev-webhook-secret";
+
+  async function setupPymthouseJwt() {
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const jwk = await exportJWK(publicKey);
+    jwk.kid = "pymthouse-test";
+    jwk.alg = "RS256";
+    jwk.use = "sig";
+    const jwks = createLocalJWKSet({ keys: [jwk] });
+    const audience = stripTrailingSlashes(PYMTHOUSE_ISSUER);
+    const token = await new SignJWT({
+      client_id: "app_abc123",
+      external_user_id: "user-456",
+      scope: "sign:job",
+    })
+      .setProtectedHeader({ alg: "RS256", kid: "pymthouse-test" })
+      .setIssuer(PYMTHOUSE_ISSUER)
+      .setAudience(audience)
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    return { token, jwks, audience };
+  }
+
+  function verifierFor(jwks, audience, extras = {}) {
+    return createOidcVerifier({
+      jwtIssuer: PYMTHOUSE_ISSUER,
+      jwtAudience: audience,
+      issuer: PYMTHOUSE_ISSUER,
+      jwks,
+      clientClaim: "client_id",
+      subjectClaim: "external_user_id",
+      subjectTypeValue: "external_user_id",
+      requiredScopes: ["sign:job"],
+      ...extras,
+    });
+  }
+
+  function authorizeRequestFor(token) {
+    return new Request("http://localhost/webhooks/remote-signer", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${SECRET}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ headers: { Authorization: [`Bearer ${token}`] } }),
+    });
+  }
+
+  it("authorizes a pymthouse-style JWT end-to-end", async () => {
+    const { token, jwks, audience } = await setupPymthouseJwt();
+    const config = {
+      webhookSecret: SECRET,
+      endUserAuth: verifierFor(jwks, audience),
+    };
+
+    const response = await handleAuthorize(authorizeRequestFor(token), config);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 200);
+    assert.equal(body.auth_id, "app_abc123:user-456");
+    assert.equal(body.identity.client_id, "app_abc123");
+    assert.equal(body.identity.usage_subject, "user-456");
+    assert.equal(body.identity.usage_subject_type, "external_user_id");
+  });
+
+  it("authorizes a composite app_*.pmth_* via mocked exchange", async () => {
+    const { token, jwks, audience } = await setupPymthouseJwt();
+    const clientId = "app_abc123";
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      assert.ok(url.includes(`/api/v1/apps/${clientId}/oidc/token`));
+      return Response.json({ access_token: token, expires_in: 300 });
+    };
+    const config = {
+      webhookSecret: SECRET,
+      endUserAuth: verifierFor(jwks, audience, {
+        tokenExchangeBaseUrl: "http://localhost:3000",
+        fetchImpl,
+      }),
+    };
+
+    const response = await handleAuthorize(
+      authorizeRequestFor(`${clientId}.pmth_deadbeef`),
+      config,
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 200);
+    assert.equal(body.auth_id, "app_abc123:user-456");
+  });
+
+  it("rejects a verified JWT with 483 when the live balance gate sees zero credit", async () => {
+    const { token, jwks, audience } = await setupPymthouseJwt();
+    const { createBalanceGate } = await import("./balance-gate.mjs");
+    const config = {
+      webhookSecret: SECRET,
+      endUserAuth: verifierFor(jwks, audience),
+      checkBalance: createBalanceGate({ getBalanceUsdMicros: async () => 0n }),
+    };
+
+    const response = await handleAuthorize(authorizeRequestFor(token), config);
+    assert.equal(response.status, 200); // HTTP 200 per go-livepeer contract
+    const body = await response.json();
+    assert.equal(body.status, 483);
+    assert.equal(body.code, "insufficient_balance");
+  });
+
+  it("authorizes a verified JWT and caps expiry when the live balance gate sees credit", async () => {
+    const { token, jwks, audience } = await setupPymthouseJwt();
+    const { createBalanceGate } = await import("./balance-gate.mjs");
+    let seenIdentity;
+    const config = {
+      webhookSecret: SECRET,
+      endUserAuth: verifierFor(jwks, audience),
+      checkBalance: createBalanceGate({
+        getBalanceUsdMicros: async (identity) => {
+          seenIdentity = identity;
+          return 5_000_000n;
+        },
+        reauthTtlSeconds: 30,
+      }),
+    };
+
+    const before = Math.floor(Date.now() / 1000);
+    const response = await handleAuthorize(authorizeRequestFor(token), config);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 200);
+    assert.equal(body.auth_id, "app_abc123:user-456");
+    assert.equal(seenIdentity.client_id, "app_abc123");
+    assert.equal(seenIdentity.usage_subject, "user-456");
+    assert.ok(body.expiry >= before + 30 && body.expiry <= before + 31);
   });
 });
