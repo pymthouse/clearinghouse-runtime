@@ -108,6 +108,31 @@ describe("createLegacyWebhookConfigFromEnv", () => {
     assert.equal(config.webhookSecret, "secret");
     assert.equal(config.endUserAuth.kind, "oidc");
   });
+
+  it("passes a checkBalance hook through to the config", () => {
+    const checkBalance = async () => undefined;
+    const config = createLegacyWebhookConfigFromEnv(
+      { WEBHOOK_SECRET: "secret", JWT_ISSUER: "https://pymthouse.com/api/v1/oidc" },
+      { checkBalance },
+    );
+    assert.equal(config.checkBalance, checkBalance);
+  });
+
+  it("omits checkBalance when none is provided", () => {
+    const config = createLegacyWebhookConfigFromEnv({
+      WEBHOOK_SECRET: "secret",
+      JWT_ISSUER: "https://pymthouse.com/api/v1/oidc",
+    });
+    assert.equal(config.checkBalance, undefined);
+  });
+
+  it("ignores a non-function checkBalance", () => {
+    const config = createLegacyWebhookConfigFromEnv(
+      { WEBHOOK_SECRET: "secret", JWT_ISSUER: "https://pymthouse.com/api/v1/oidc" },
+      { checkBalance: "not-a-function" },
+    );
+    assert.equal(config.checkBalance, undefined);
+  });
 });
 
 describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
@@ -214,5 +239,75 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
     const body = await response.json();
     assert.equal(body.status, 200);
     assert.equal(body.auth_id, "app_abc123:user-456");
+  });
+
+  async function verifierFor(jwks) {
+    const { createOidcVerifier } = await import("./verifiers.mjs");
+    return createOidcVerifier({
+      jwtIssuer: ISSUER,
+      jwtAudience: defaultSignerWebhookJwtAudience(ISSUER),
+      issuer: ISSUER,
+      jwks,
+      clientClaim: "client_id",
+      subjectClaim: "external_user_id",
+      subjectTypeValue: "external_user_id",
+      requiredScopes: ["sign:job"],
+    });
+  }
+
+  function authorizeRequestFor(token) {
+    return new Request("http://localhost/webhooks/remote-signer", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${SECRET}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ headers: { Authorization: [`Bearer ${token}`] } }),
+    });
+  }
+
+  it("rejects a verified JWT with 483 when the live balance gate sees zero credit", async () => {
+    const { token, jwks } = await setupPymthouseJwt();
+    const { createBalanceGate } = await import("./balance-gate.mjs");
+    const config = {
+      webhookSecret: SECRET,
+      endUserAuth: await verifierFor(jwks),
+      checkBalance: createBalanceGate({ getBalanceUsdMicros: async () => 0n }),
+    };
+
+    const response = await handleAuthorize(authorizeRequestFor(token), config);
+    assert.equal(response.status, 200); // HTTP 200 per go-livepeer contract
+    const body = await response.json();
+    assert.equal(body.status, 483);
+    assert.equal(body.code, "insufficient_balance");
+  });
+
+  it("authorizes a verified JWT and caps expiry when the live balance gate sees credit", async () => {
+    const { token, jwks } = await setupPymthouseJwt();
+    const { createBalanceGate } = await import("./balance-gate.mjs");
+    let seenIdentity;
+    const config = {
+      webhookSecret: SECRET,
+      endUserAuth: await verifierFor(jwks),
+      checkBalance: createBalanceGate({
+        getBalanceUsdMicros: async (identity) => {
+          seenIdentity = identity;
+          return 5_000_000n;
+        },
+        reauthTtlSeconds: 30,
+      }),
+    };
+
+    const before = Math.floor(Date.now() / 1000);
+    const response = await handleAuthorize(authorizeRequestFor(token), config);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 200);
+    assert.equal(body.auth_id, "app_abc123:user-456");
+    // The balance gate keys off the same client_id:usage_subject the collector meters.
+    assert.equal(seenIdentity.client_id, "app_abc123");
+    assert.equal(seenIdentity.usage_subject, "user-456");
+    // Expiry is capped to now + reauthTtlSeconds so credit is re-checked mid-stream.
+    assert.ok(body.expiry >= before + 30 && body.expiry <= before + 31);
   });
 });
