@@ -158,7 +158,7 @@ Shared keys (`WEBHOOK_SECRET`, `KAFKA_BROKERS`, `KAFKA_GATEWAY_TOPIC`) are liste
 | `API_KEY_PREFIX` | `api_key`, optional | Default `sk_` |
 | `OIDC_ISSUER` | `oidc` | JWT issuer / JWKS host |
 | `OIDC_AUDIENCE` | `oidc` | Expected JWT audience |
-| `OIDC_JWKS_URI` | `oidc`, optional | Defaults to `${OIDC_ISSUER}/.well-known/jwks.json` |
+| `OIDC_JWKS_URI` | `oidc`, optional | Explicit JWKS override; otherwise resolved via OIDC Discovery (`${OIDC_ISSUER}/.well-known/openid-configuration` → `jwks_uri`) |
 | `OIDC_CLIENT_CLAIM` | `oidc`, optional | Tenant claim (default `azp`; Auth0 clearinghouse uses `app_client_id`) |
 | `OIDC_SUBJECT_CLAIM` | `oidc`, optional | End-user claim (default `sub`; Auth0 clearinghouse uses `external_user_id`) |
 | `OIDC_SUBJECT_TYPE` | `oidc`, optional | Default `oidc_user`; Auth0 clearinghouse uses `external_user_id` |
