@@ -59,9 +59,9 @@ export function createApiKeyVerifier({
   };
 }
 
-/** Strip a trailing slash so issuer comparisons are stable. */
+/** Trim and strip a trailing slash so issuer comparisons are stable. */
 function normalizeIssuer(issuer) {
-  return String(issuer ?? "").replace(/\/$/, "");
+  return String(issuer ?? "").trim().replace(/\/$/, "");
 }
 
 /**
@@ -78,6 +78,9 @@ function normalizeIssuer(issuer) {
 export async function discoverJwksUri(jwtIssuer, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const base = normalizeIssuer(jwtIssuer);
+  if (!base) {
+    throw new Error("discoverJwksUri: jwtIssuer is required");
+  }
   const url = `${base}/.well-known/openid-configuration`;
   let response;
   try {
@@ -119,6 +122,11 @@ export async function discoverJwksUri(jwtIssuer, options = {}) {
  */
 function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
   if (jwks) {
+    if (typeof jwks !== "function") {
+      throw new Error(
+        "createOidcVerifier: jwks must be a jose key resolver function (e.g. createLocalJWKSet(...))",
+      );
+    }
     return jwks;
   }
 
@@ -138,9 +146,7 @@ function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
             );
           }
           if (!response.ok) {
-            throw new Error(
-              `Expected 200 OK from the JSON Web Key Set HTTP response (${uri}) [${response.status}]`,
-            );
+            throw new Error(`JWKS request failed (${uri}): HTTP ${response.status}`);
           }
           let doc;
           try {

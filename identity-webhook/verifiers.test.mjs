@@ -63,6 +63,22 @@ describe("discoverJwksUri", () => {
     });
     assert.equal(uri, "https://idp.test/api/v1/oidc/jwks");
   });
+
+  it("trims surrounding whitespace on jwtIssuer and discovery issuer", async () => {
+    const uri = await discoverJwksUri("  https://idp.test/api/v1/oidc/  ", {
+      fetchImpl: async () =>
+        Response.json({
+          issuer: " https://idp.test/api/v1/oidc ",
+          jwks_uri: "https://idp.test/api/v1/oidc/jwks",
+        }),
+    });
+    assert.equal(uri, "https://idp.test/api/v1/oidc/jwks");
+  });
+
+  it("rejects a blank jwtIssuer", async () => {
+    await assert.rejects(() => discoverJwksUri("   "), /jwtIssuer is required/);
+    await assert.rejects(() => discoverJwksUri(""), /jwtIssuer is required/);
+  });
 });
 
 describe("createOidcVerifier discovery", () => {
@@ -142,6 +158,42 @@ describe("createOidcVerifier discovery", () => {
         w.includes(`JWKS request failed (${jwksUri}): network down`),
       ),
       `expected JWKS URL in warn log, got: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  it("wraps non-ok JWKS HTTP responses with the JWKS URL", async () => {
+    const issuer = "https://idp.test/api/v1/oidc";
+    const jwksUri = `${issuer}/jwks`;
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return Response.json({ issuer, jwks_uri: jwksUri });
+      }
+      if (url.startsWith(jwksUri)) {
+        return new Response("gone", { status: 503 });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const verifier = createOidcVerifier({
+        jwtIssuer: issuer,
+        jwtAudience: "clearinghouse",
+        fetchImpl,
+      });
+      await assert.rejects(
+        () => verifier.verify({ authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.e30.sig" }),
+        /oidc verification failed/,
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.ok(
+      warnings.some((w) => w.includes(`JWKS request failed (${jwksUri}): HTTP 503`)),
+      `expected JWKS HTTP status in warn log, got: ${JSON.stringify(warnings)}`,
     );
   });
 
@@ -337,6 +389,18 @@ describe("createOidcVerifier (jose, locally-minted JWT)", () => {
       jwks,
     });
     await assert.rejects(() => verifier.verify({ authorization: "Bearer sk_not_a_jwt" }), /not a JWT/);
+  });
+
+  it("rejects a JWKS JSON object passed as jwks", () => {
+    assert.throws(
+      () =>
+        createOidcVerifier({
+          jwtIssuer: "https://idp.test/",
+          jwtAudience: "clearinghouse",
+          jwks: { keys: [] },
+        }),
+      /jwks must be a jose key resolver function/,
+    );
   });
 });
 
