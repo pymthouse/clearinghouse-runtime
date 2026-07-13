@@ -402,6 +402,29 @@ describe("createOidcVerifier (jose, locally-minted JWT)", () => {
       /jwks must be a jose key resolver function/,
     );
   });
+
+  it("includes a malformed jwksUri in the verification warning", async () => {
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const verifier = createOidcVerifier({
+        jwtIssuer: "https://idp.test/",
+        jwtAudience: "clearinghouse",
+        jwksUri: "/relative/jwks",
+      });
+      await assert.rejects(
+        () => verifier.verify({ authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.e30.sig" }),
+        /oidc verification failed/,
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.ok(
+      warnings.some((w) => w.includes("JWKS URI is not a valid URL (/relative/jwks)")),
+      `expected malformed JWKS URI in warn log, got: ${JSON.stringify(warnings)}`,
+    );
+  });
 });
 
 describe("createEndUserVerifierFromEnv", () => {

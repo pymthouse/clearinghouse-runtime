@@ -162,7 +162,15 @@ function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
             );
           }
         }
-        return createRemoteJWKSet(new URL(uri));
+        let jwksUrl;
+        try {
+          jwksUrl = new URL(uri);
+        } catch (err) {
+          throw new Error(
+            `JWKS URI is not a valid URL (${uri}): ${err instanceof Error ? err.message : err}`,
+          );
+        }
+        return createRemoteJWKSet(jwksUrl);
       })();
       try {
         remote = await resolving;
