@@ -59,6 +59,11 @@ export function createApiKeyVerifier({
   };
 }
 
+/** Strip a trailing slash so issuer comparisons are stable. */
+function normalizeIssuer(issuer) {
+  return String(issuer ?? "").replace(/\/$/, "");
+}
+
 /**
  * Resolve `jwks_uri` via OIDC Discovery (issuer-relative
  * `/.well-known/openid-configuration`), matching oauth4webapi / builder-sdk.
@@ -70,10 +75,6 @@ export function createApiKeyVerifier({
  * @param {{ fetchImpl?: typeof fetch }} [options]
  * @returns {Promise<string>}
  */
-function normalizeIssuer(issuer) {
-  return String(issuer ?? "").replace(/\/$/, "");
-}
-
 export async function discoverJwksUri(jwtIssuer, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const base = normalizeIssuer(jwtIssuer);
@@ -87,7 +88,7 @@ export async function discoverJwksUri(jwtIssuer, options = {}) {
     );
   }
   if (!response.ok) {
-    throw new Error(`OIDC discovery failed: expected 200 from ${url}, got ${response.status}`);
+    throw new Error(`OIDC discovery failed (${url}): HTTP ${response.status}`);
   }
   let doc;
   try {
