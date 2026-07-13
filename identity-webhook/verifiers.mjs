@@ -147,11 +147,23 @@ function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
           } catch {
             throw new Error(`JWKS response is not JSON (${uri})`);
           }
-          return createLocalJWKSet(doc);
+          try {
+            return createLocalJWKSet(doc);
+          } catch (err) {
+            throw new Error(
+              `JWKS is invalid (${uri}): ${err instanceof Error ? err.message : err}`,
+            );
+          }
         }
         return createRemoteJWKSet(new URL(uri));
       })();
-      remote = await resolving;
+      try {
+        remote = await resolving;
+      } catch (err) {
+        // Clear so a later verify can retry after transient discovery/JWKS failures.
+        resolving = undefined;
+        throw err;
+      }
     }
     return remote(protectedHeader, token);
   };

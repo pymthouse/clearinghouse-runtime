@@ -144,6 +144,90 @@ describe("createOidcVerifier discovery", () => {
       `expected JWKS URL in warn log, got: ${JSON.stringify(warnings)}`,
     );
   });
+
+  it("wraps invalid JWKS documents with the JWKS URL", async () => {
+    const issuer = "https://idp.test/api/v1/oidc";
+    const jwksUri = `${issuer}/jwks`;
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return Response.json({ issuer, jwks_uri: jwksUri });
+      }
+      if (url.startsWith(jwksUri)) {
+        return Response.json({ keys: "not-an-array" });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const verifier = createOidcVerifier({
+        jwtIssuer: issuer,
+        jwtAudience: "clearinghouse",
+        fetchImpl,
+      });
+      await assert.rejects(
+        () => verifier.verify({ authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.e30.sig" }),
+        /oidc verification failed/,
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.ok(
+      warnings.some((w) => w.includes(`JWKS is invalid (${jwksUri})`)),
+      `expected JWKS URL in warn log, got: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  it("retries discovery after a transient failure", async () => {
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const jwk = await exportJWK(publicKey);
+    jwk.kid = "retry-key";
+    jwk.alg = "RS256";
+    jwk.use = "sig";
+    const issuer = "https://idp.test/api/v1/oidc";
+    const jwksUri = `${issuer}/jwks`;
+    let discoveryAttempts = 0;
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        discoveryAttempts += 1;
+        if (discoveryAttempts === 1) {
+          throw new Error("temporary outage");
+        }
+        return Response.json({ issuer, jwks_uri: jwksUri });
+      }
+      if (url.startsWith(jwksUri)) {
+        return Response.json({ keys: [jwk] });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const token = await new SignJWT({ sub: "user-retry", azp: "app-retry" })
+      .setProtectedHeader({ alg: "RS256", kid: "retry-key" })
+      .setIssuer(issuer)
+      .setAudience("clearinghouse")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+
+    const verifier = createOidcVerifier({
+      jwtIssuer: issuer,
+      jwtAudience: "clearinghouse",
+      fetchImpl,
+    });
+
+    await assert.rejects(
+      () => verifier.verify({ authorization: `Bearer ${token}` }),
+      /oidc verification failed/,
+    );
+
+    const { identity } = await verifier.verify({ authorization: `Bearer ${token}` });
+    assert.equal(identity.usage_subject, "user-retry");
+    assert.equal(discoveryAttempts, 2);
+  });
 });
 
 describe("createApiKeyVerifier", () => {
