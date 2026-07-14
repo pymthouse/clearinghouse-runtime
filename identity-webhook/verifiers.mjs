@@ -12,7 +12,12 @@
  */
 import { hkdfSync, randomBytes } from "node:crypto";
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from "jose";
-import { bearerToken, WebhookError } from "./protocol.mjs";
+import {
+  bearerToken,
+  REMOTE_SIGNER_ERROR_CODE,
+  REMOTE_SIGNER_HTTP_STATUS,
+  WebhookError,
+} from "./protocol.mjs";
 import { loadApiKeyStore } from "./keys.mjs";
 
 export const IDENTITY_AUTH_MODES = ["api_key", "oidc"];
@@ -383,6 +388,50 @@ function createCompositeExchangeCache() {
   };
 }
 
+/**
+ * Map a non-OK composite token-exchange response to a webhook reject.
+ * Payment / allowance failures (HTTP 402, trial_credits_exhausted) must reach
+ * the gateway as 402 — not be collapsed to 401 like auth failures.
+ */
+function webhookErrorFromExchangeReject(httpStatus, payload) {
+  const code =
+    payload && typeof payload.error === "string" && payload.error.trim()
+      ? payload.error.trim()
+      : "invalid_token";
+  const reason =
+    payload &&
+    typeof payload.error_description === "string" &&
+    payload.error_description.trim()
+      ? payload.error_description.trim()
+      : "token exchange failed";
+
+  if (
+    httpStatus === REMOTE_SIGNER_HTTP_STATUS.BILLING_UNAVAILABLE ||
+    code === REMOTE_SIGNER_ERROR_CODE.BILLING_UNAVAILABLE
+  ) {
+    return new WebhookError(reason, {
+      status: REMOTE_SIGNER_HTTP_STATUS.BILLING_UNAVAILABLE,
+      code: REMOTE_SIGNER_ERROR_CODE.BILLING_UNAVAILABLE,
+    });
+  }
+  if (
+    httpStatus === REMOTE_SIGNER_HTTP_STATUS.PAYMENT_REQUIRED ||
+    code === REMOTE_SIGNER_ERROR_CODE.TRIAL_CREDITS_EXHAUSTED
+  ) {
+    return new WebhookError(reason, {
+      status: REMOTE_SIGNER_HTTP_STATUS.PAYMENT_REQUIRED,
+      code:
+        code === "invalid_token"
+          ? REMOTE_SIGNER_ERROR_CODE.TRIAL_CREDITS_EXHAUSTED
+          : code,
+    });
+  }
+  return new WebhookError(reason, {
+    status: 401,
+    code: "invalid_token",
+  });
+}
+
 async function exchangeCompositeApiKey({
   exchangeBaseUrl,
   publicClientId,
@@ -441,10 +490,7 @@ async function exchangeCompositeApiKey({
       `composite api key exchange rejected status=${response.status} client_id=${logSafe(publicClientId)} key_id=${keyId}` +
         (correlationId ? ` correlation_id=${correlationId}` : ""),
     );
-    throw new WebhookError("token exchange failed", {
-      status: 401,
-      code: "invalid_token",
-    });
+    throw webhookErrorFromExchangeReject(response.status, payload);
   }
 
   const accessToken =
