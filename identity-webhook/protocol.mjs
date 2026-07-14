@@ -115,11 +115,10 @@ export function authIdFromIdentity(identity) {
 
 export function isValidUsageIdentity(identity) {
   return Boolean(
-    identity &&
-      identity.issuer &&
-      identity.client_id &&
-      identity.usage_subject &&
-      identity.usage_subject_type,
+    identity?.issuer &&
+      identity?.client_id &&
+      identity?.usage_subject &&
+      identity?.usage_subject_type,
   );
 }
 

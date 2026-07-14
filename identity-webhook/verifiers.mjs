@@ -122,10 +122,10 @@ export function createApiKeyVerifier({
   expiryTtlSeconds = 60,
 }) {
   if (!issuer) {
-    throw new Error("createApiKeyVerifier: issuer is required");
+    throw new TypeError("createApiKeyVerifier: issuer is required");
   }
   if (typeof resolveApiKey !== "function") {
-    throw new Error("createApiKeyVerifier: resolveApiKey is required");
+    throw new TypeError("createApiKeyVerifier: resolveApiKey is required");
   }
   return {
     kind: "api_key",
@@ -210,10 +210,55 @@ export async function discoverJwksUri(jwtIssuer, options = {}) {
  * When `fetchImpl` is set (tests / custom HTTP), JWKS is loaded through it into
  * a local keyset. Otherwise jose's createRemoteJWKSet fetches and caches.
  */
+async function createLocalJwksResolver(uri, fetchImpl) {
+  let response;
+  try {
+    response = await fetchImpl(uri);
+  } catch (err) {
+    throw new Error(
+      `JWKS request failed (${uri}): ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`JWKS request failed (${uri}): HTTP ${response.status}`);
+  }
+
+  let doc;
+  try {
+    doc = await response.json();
+  } catch {
+    throw new Error(`JWKS response is not JSON (${uri})`);
+  }
+  try {
+    return createLocalJWKSet(doc);
+  } catch (err) {
+    throw new Error(
+      `JWKS is invalid (${uri}): ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+function createRemoteJwksResolver(uri) {
+  try {
+    return createRemoteJWKSet(new URL(uri));
+  } catch (err) {
+    throw new Error(
+      `JWKS URI is not a valid URL (${uri}): ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+async function resolveOidcKeyResolver({ jwksUri, jwtIssuer, fetchImpl }) {
+  const uri = jwksUri ?? (await discoverJwksUri(jwtIssuer, { fetchImpl }));
+  return fetchImpl
+    ? createLocalJwksResolver(uri, fetchImpl)
+    : createRemoteJwksResolver(uri);
+}
+
 function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
   if (jwks) {
     if (typeof jwks !== "function") {
-      throw new Error(
+      throw new TypeError(
         "createOidcVerifier: jwks must be a jose key resolver function (e.g. createLocalJWKSet(...))",
       );
     }
@@ -224,44 +269,7 @@ function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
   let resolving;
   return async (protectedHeader, token) => {
     if (!remote) {
-      resolving ??= (async () => {
-        const uri = jwksUri ?? (await discoverJwksUri(jwtIssuer, { fetchImpl }));
-        if (fetchImpl) {
-          let response;
-          try {
-            response = await fetchImpl(uri);
-          } catch (err) {
-            throw new Error(
-              `JWKS request failed (${uri}): ${err instanceof Error ? err.message : err}`,
-            );
-          }
-          if (!response.ok) {
-            throw new Error(`JWKS request failed (${uri}): HTTP ${response.status}`);
-          }
-          let doc;
-          try {
-            doc = await response.json();
-          } catch {
-            throw new Error(`JWKS response is not JSON (${uri})`);
-          }
-          try {
-            return createLocalJWKSet(doc);
-          } catch (err) {
-            throw new Error(
-              `JWKS is invalid (${uri}): ${err instanceof Error ? err.message : err}`,
-            );
-          }
-        }
-        let jwksUrl;
-        try {
-          jwksUrl = new URL(uri);
-        } catch (err) {
-          throw new Error(
-            `JWKS URI is not a valid URL (${uri}): ${err instanceof Error ? err.message : err}`,
-          );
-        }
-        return createRemoteJWKSet(jwksUrl);
-      })();
+      resolving ??= resolveOidcKeyResolver({ jwksUri, jwtIssuer, fetchImpl });
       try {
         remote = await resolving;
       } catch (err) {
