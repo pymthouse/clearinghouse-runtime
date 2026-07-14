@@ -12,7 +12,7 @@
  *
  * Response the signer expects:
  *   success → 200 { status:200, auth_id:"client_id:usage_subject", identity, expiry }
- *   reject  → 200 { status:<402|480-483|503|4xx>, reason, code? }  (HTTP 200, status in body)
+ *   reject  → 200 { status:<480-483|503|4xx>, reason, code? }  (HTTP 200, status in body)
  *   bad caller secret → HTTP 401, bad JSON → HTTP 400.
  *
  * Consumers may attach an optional `config.checkBalance` hook to enforce a live
@@ -25,18 +25,16 @@ import { timingSafeEqual } from "node:crypto";
 
 /** HTTP statuses go-livepeer's signer returns to gateway clients. */
 export const REMOTE_SIGNER_HTTP_STATUS = {
-  /** Allowance / credits exhausted (e.g. mint or token-exchange gate). */
-  PAYMENT_REQUIRED: 402,
   REFRESH_SESSION: 480,
   PRICE_EXCEEDED: 481,
   NO_TICKETS: 482,
+  /** Identity-hook: end-user allowance / credits exhausted (mint or live gate). */
   INSUFFICIENT_BALANCE: 483,
   BILLING_UNAVAILABLE: 503,
 };
 
 /** Machine-readable reject codes forwarded through the webhook wire protocol. */
 export const REMOTE_SIGNER_ERROR_CODE = {
-  TRIAL_CREDITS_EXHAUSTED: "trial_credits_exhausted",
   INSUFFICIENT_BALANCE: "insufficient_balance",
   BILLING_UNAVAILABLE: "billing_unavailable",
 };

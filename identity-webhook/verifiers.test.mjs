@@ -658,7 +658,7 @@ describe("createOidcVerifier composite API key exchange", () => {
     );
   });
 
-  it("propagates exchange 402 trial_credits_exhausted to the webhook", async () => {
+  it("maps exchange 402 trial_credits_exhausted to webhook 483", async () => {
     const { jwks } = await setup();
     const clientId = "app_3b386c81a1db1169fd2c3986";
     const fetchImpl = async () =>
@@ -681,8 +681,9 @@ describe("createOidcVerifier composite API key exchange", () => {
       () => verifier.verify({ authorization: `Bearer ${clientId}_deadbeef` }),
       (err) => {
         assert.equal(err.name, "WebhookError");
-        assert.equal(err.status, 402);
-        assert.equal(err.code, "trial_credits_exhausted");
+        // Match createBalanceGate / go-livepeer webhook passthrough wire.
+        assert.equal(err.status, 483);
+        assert.equal(err.code, "insufficient_balance");
         assert.equal(err.message, "Starter allowance exhausted");
         return true;
       },
@@ -711,9 +712,9 @@ describe("createOidcVerifier composite API key exchange", () => {
       () => verifier.verify({ authorization: `Bearer ${clientId}_deadbeef` }),
       (err) => {
         assert.equal(err.name, "WebhookError");
-        // Prefer billing_unavailable code over bare HTTP 402 from mint gate.
         assert.equal(err.status, 503);
         assert.equal(err.code, "billing_unavailable");
+        assert.equal(err.message, "Billing allowance could not be confirmed");
         return true;
       },
     );

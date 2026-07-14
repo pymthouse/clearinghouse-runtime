@@ -390,43 +390,50 @@ function createCompositeExchangeCache() {
 
 /**
  * Map a non-OK composite token-exchange response to a webhook reject.
- * Payment / allowance failures (HTTP 402, trial_credits_exhausted) must reach
- * the gateway as 402 — not be collapsed to 401 like auth failures.
+ *
+ * go-livepeer `authLivePayment` forwards webhook body `status` + `reason` to the
+ * gateway unchanged (see remote_signer.go). Align allowance rejects with the
+ * live balance gate: 483 `insufficient_balance` / 503 `billing_unavailable`.
+ * Do not collapse payment failures to 401 (auth-only).
+ *
+ * Upstream mint gates often use HTTP 402 + `trial_credits_exhausted`; that is
+ * remapped onto the identity-hook wire statuses above.
  */
 function webhookErrorFromExchangeReject(httpStatus, payload) {
-  const code =
+  const upstreamCode =
     payload && typeof payload.error === "string" && payload.error.trim()
       ? payload.error.trim()
-      : "invalid_token";
+      : "";
   const reason =
     payload &&
     typeof payload.error_description === "string" &&
     payload.error_description.trim()
       ? payload.error_description.trim()
-      : "token exchange failed";
+      : "";
 
   if (
     httpStatus === REMOTE_SIGNER_HTTP_STATUS.BILLING_UNAVAILABLE ||
-    code === REMOTE_SIGNER_ERROR_CODE.BILLING_UNAVAILABLE
+    upstreamCode === REMOTE_SIGNER_ERROR_CODE.BILLING_UNAVAILABLE
   ) {
-    return new WebhookError(reason, {
+    return new WebhookError(reason || "billing balance unavailable", {
       status: REMOTE_SIGNER_HTTP_STATUS.BILLING_UNAVAILABLE,
       code: REMOTE_SIGNER_ERROR_CODE.BILLING_UNAVAILABLE,
     });
   }
+
+  // Mint/OIDC exchange: HTTP 402 or trial_credits_exhausted → identity-hook 483.
   if (
-    httpStatus === REMOTE_SIGNER_HTTP_STATUS.PAYMENT_REQUIRED ||
-    code === REMOTE_SIGNER_ERROR_CODE.TRIAL_CREDITS_EXHAUSTED
+    httpStatus === 402 ||
+    upstreamCode === "trial_credits_exhausted" ||
+    upstreamCode === REMOTE_SIGNER_ERROR_CODE.INSUFFICIENT_BALANCE
   ) {
-    return new WebhookError(reason, {
-      status: REMOTE_SIGNER_HTTP_STATUS.PAYMENT_REQUIRED,
-      code:
-        code === "invalid_token"
-          ? REMOTE_SIGNER_ERROR_CODE.TRIAL_CREDITS_EXHAUSTED
-          : code,
+    return new WebhookError(reason || "insufficient balance", {
+      status: REMOTE_SIGNER_HTTP_STATUS.INSUFFICIENT_BALANCE,
+      code: REMOTE_SIGNER_ERROR_CODE.INSUFFICIENT_BALANCE,
     });
   }
-  return new WebhookError(reason, {
+
+  return new WebhookError(reason || "token exchange failed", {
     status: 401,
     code: "invalid_token",
   });

@@ -1,5 +1,4 @@
 export const REMOTE_SIGNER_HTTP_STATUS: {
-  readonly PAYMENT_REQUIRED: 402;
   readonly REFRESH_SESSION: 480;
   readonly PRICE_EXCEEDED: 481;
   readonly NO_TICKETS: 482;
@@ -8,7 +7,6 @@ export const REMOTE_SIGNER_HTTP_STATUS: {
 };
 
 export const REMOTE_SIGNER_ERROR_CODE: {
-  readonly TRIAL_CREDITS_EXHAUSTED: "trial_credits_exhausted";
   readonly INSUFFICIENT_BALANCE: "insufficient_balance";
   readonly BILLING_UNAVAILABLE: "billing_unavailable";
 };
