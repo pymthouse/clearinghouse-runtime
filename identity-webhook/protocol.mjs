@@ -28,6 +28,7 @@ export const REMOTE_SIGNER_HTTP_STATUS = {
   REFRESH_SESSION: 480,
   PRICE_EXCEEDED: 481,
   NO_TICKETS: 482,
+  /** Identity-hook: end-user allowance / credits exhausted (mint or live gate). */
   INSUFFICIENT_BALANCE: 483,
   BILLING_UNAVAILABLE: 503,
 };
@@ -114,11 +115,10 @@ export function authIdFromIdentity(identity) {
 
 export function isValidUsageIdentity(identity) {
   return Boolean(
-    identity &&
-      identity.issuer &&
-      identity.client_id &&
-      identity.usage_subject &&
-      identity.usage_subject_type,
+    identity?.issuer &&
+      identity?.client_id &&
+      identity?.usage_subject &&
+      identity?.usage_subject_type,
   );
 }
 
