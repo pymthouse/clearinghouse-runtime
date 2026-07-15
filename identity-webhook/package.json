@@ -1,6 +1,6 @@
 {
   "name": "@pymthouse/clearinghouse-identity-webhook",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "API-key + OIDC identity webhook for go-livepeer remote signer (jose)",
   "type": "module",
   "license": "MIT",
@@ -26,11 +26,6 @@
       "types": "./balance-gate.d.ts",
       "import": "./balance-gate.mjs",
       "default": "./balance-gate.mjs"
-    },
-    "./legacy-env": {
-      "types": "./legacy-env.d.ts",
-      "import": "./legacy-env.mjs",
-      "default": "./legacy-env.mjs"
     }
   },
   "files": [
@@ -40,8 +35,6 @@
     "verifiers.d.ts",
     "balance-gate.mjs",
     "balance-gate.d.ts",
-    "legacy-env.mjs",
-    "legacy-env.d.ts",
     "keys.mjs"
   ],
   "dependencies": {
@@ -62,11 +55,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/pymthouse/clearinghouse-runtime.git",
+    "url": "https://github.com/pymthouse/clearinghouse.git",
     "directory": "identity-webhook"
   },
   "bugs": {
-    "url": "https://github.com/pymthouse/clearinghouse-runtime/issues"
+    "url": "https://github.com/pymthouse/clearinghouse/issues"
   },
-  "homepage": "https://github.com/pymthouse/clearinghouse-runtime/tree/main/identity-webhook#readme"
+  "homepage": "https://github.com/pymthouse/clearinghouse/tree/main/identity-webhook#readme"
 }
