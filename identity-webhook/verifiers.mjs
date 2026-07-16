@@ -7,7 +7,7 @@
  *
  * - createApiKeyVerifier: resolves `sk_…` keys via a caller-supplied lookup.
  * - createOidcVerifier:   verifies a JWT bearer against an OIDC issuer's JWKS (jose),
- *   or exchanges a composite `app_*.pmth_*` API key via RFC 8693 then verifies.
+ *   or exchanges a composite `app_<24hex>_<secret>` API key via RFC 8693 then verifies.
  * - createEndUserVerifierFromEnv: picks exactly one verifier via IDENTITY_AUTH_MODE.
  */
 import { hkdfSync, randomBytes } from "node:crypto";
@@ -21,29 +21,31 @@ const GRANT_TYPE_TOKEN_EXCHANGE =
   "urn:ietf:params:oauth:grant-type:token-exchange";
 const SUBJECT_ACCESS_TOKEN_TYPE =
   "urn:ietf:params:oauth:token-type:access_token";
-const COMPOSITE_CLIENT_ID_RE = /^app_[a-z0-9]+$/;
+/** Underscore composite: `app_<24hex>_<opaqueSecret>` (no `.` — better copy/select UX). */
+const COMPOSITE_API_KEY_RE = /^(app_[a-f0-9]{24})_(.+)$/;
 const COMPOSITE_CACHE_MAX_TTL_SECONDS = 60;
-const ALLOWED_JWT_ALGS = ["RS256"];
+/** Asymmetric algs only — never HS* (shared-secret confusion). */
+const ALLOWED_JWT_ALGS = ["RS256", "ES256"];
+const JWT_CLOCK_TOLERANCE_SECONDS = 60;
 
 function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
 /**
- * Split `app_<clientId>.pmth_<key>` into parts. Returns null when not composite.
+ * Split `app_<24hex>_<secret>` into parts. Returns null when not composite.
+ * The secret segment is opaque issuer key material. Client-secret shaped
+ * segments (`cs_…`) are rejected.
  */
 export function splitCompositeApiKey(token) {
   const trimmed = (token ?? "").trim();
-  const dot = trimmed.indexOf(".");
-  if (dot <= 0 || trimmed.includes(".", dot + 1)) {
+  const match = COMPOSITE_API_KEY_RE.exec(trimmed);
+  if (!match) {
     return null;
   }
-  const publicClientId = trimmed.slice(0, dot);
-  const apiKey = trimmed.slice(dot + 1);
-  if (!COMPOSITE_CLIENT_ID_RE.test(publicClientId)) {
-    return null;
-  }
-  if (!apiKey.startsWith("pmth_") || apiKey.startsWith("pmth_cs_")) {
+  const publicClientId = match[1];
+  const apiKey = match[2];
+  if (!apiKey || apiKey.startsWith("cs_") || apiKey.includes("_cs_")) {
     return null;
   }
   return { publicClientId, apiKey };
@@ -56,11 +58,13 @@ function isLoopbackHost(hostname) {
 
 /**
  * Validate OIDC_TOKEN_EXCHANGE_BASE_URL: HTTPS required except loopback.
+ * Must be an origin only — path/query/hash are rejected so a mis-set
+ * `https://host/exchange` cannot silently become `https://host`.
  * @param {string} baseUrl
  * @returns {string} normalized origin (no trailing slash)
  */
 export function normalizeTokenExchangeBaseUrl(baseUrl) {
-  const trimmed = (baseUrl ?? "").trim().replace(/\/$/, "");
+  const trimmed = (baseUrl ?? "").trim();
   if (!trimmed) {
     throw new Error("tokenExchangeBaseUrl is required for composite API key exchange");
   }
@@ -69,6 +73,12 @@ export function normalizeTokenExchangeBaseUrl(baseUrl) {
     url = new URL(trimmed);
   } catch {
     throw new Error(`tokenExchangeBaseUrl is not a valid URL: ${trimmed}`);
+  }
+  const path = url.pathname.replace(/\/$/, "") || "/";
+  if (path !== "/" || url.search || url.hash) {
+    throw new Error(
+      `tokenExchangeBaseUrl must be an origin only (no path, query, or hash); got ${trimmed}`,
+    );
   }
   if (url.protocol === "https:") {
     return url.origin;
@@ -144,12 +154,17 @@ export function createApiKeyVerifier({
   };
 }
 
+/** Trim and strip a trailing slash so issuer comparisons are stable. */
+function normalizeIssuer(issuer) {
+  return String(issuer ?? "").trim().replace(/\/$/, "");
+}
+
 /**
  * Resolve `jwks_uri` via OIDC Discovery (issuer-relative
  * `/.well-known/openid-configuration`), matching oauth4webapi / builder-sdk.
  *
- * Example: issuer `https://staging.pymthouse.com/api/v1/oidc` →
- * discovery advertises `jwks_uri` `https://staging.pymthouse.com/api/v1/oidc/jwks`.
+ * Example: issuer `https://idp.example/api/v1/oidc` →
+ * discovery advertises `jwks_uri` `https://idp.example/api/v1/oidc/jwks`.
  *
  * @param {string} jwtIssuer
  * @param {{ fetchImpl?: typeof fetch }} [options]
@@ -157,7 +172,10 @@ export function createApiKeyVerifier({
  */
 export async function discoverJwksUri(jwtIssuer, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const base = jwtIssuer.replace(/\/$/, "");
+  const base = normalizeIssuer(jwtIssuer);
+  if (!base) {
+    throw new Error("discoverJwksUri: jwtIssuer is required");
+  }
   const url = `${base}/.well-known/openid-configuration`;
   let response;
   try {
@@ -168,7 +186,7 @@ export async function discoverJwksUri(jwtIssuer, options = {}) {
     );
   }
   if (!response.ok) {
-    throw new Error(`OIDC discovery failed: expected 200 from ${url}, got ${response.status}`);
+    throw new Error(`OIDC discovery failed (${url}): HTTP ${response.status}`);
   }
   let doc;
   try {
@@ -176,7 +194,15 @@ export async function discoverJwksUri(jwtIssuer, options = {}) {
   } catch {
     throw new Error(`OIDC discovery response is not JSON (${url})`);
   }
-  if (!doc || typeof doc.jwks_uri !== "string" || !doc.jwks_uri.trim()) {
+  if (!doc || typeof doc.issuer !== "string" || !doc.issuer.trim()) {
+    throw new Error(`OIDC discovery document missing issuer (${url})`);
+  }
+  if (normalizeIssuer(doc.issuer) !== base) {
+    throw new Error(
+      `OIDC discovery issuer mismatch (${url}): expected ${base}, got ${doc.issuer.trim()}`,
+    );
+  }
+  if (typeof doc.jwks_uri !== "string" || !doc.jwks_uri.trim()) {
     throw new Error(`OIDC discovery document missing jwks_uri (${url})`);
   }
   return doc.jwks_uri.trim();
@@ -191,6 +217,11 @@ export async function discoverJwksUri(jwtIssuer, options = {}) {
  */
 function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
   if (jwks) {
+    if (typeof jwks !== "function") {
+      throw new Error(
+        "createOidcVerifier: jwks must be a jose key resolver function (e.g. createLocalJWKSet(...))",
+      );
+    }
     return jwks;
   }
 
@@ -201,18 +232,48 @@ function createOidcKeyResolver({ jwks, jwksUri, jwtIssuer, fetchImpl }) {
       resolving ??= (async () => {
         const uri = jwksUri ?? (await discoverJwksUri(jwtIssuer, { fetchImpl }));
         if (fetchImpl) {
-          const response = await fetchImpl(uri);
-          if (!response.ok) {
+          let response;
+          try {
+            response = await fetchImpl(uri);
+          } catch (err) {
             throw new Error(
-              `Expected 200 OK from the JSON Web Key Set HTTP response (${uri}) [${response.status}]`,
+              `JWKS request failed (${uri}): ${err instanceof Error ? err.message : err}`,
             );
           }
-          const doc = await response.json();
-          return createLocalJWKSet(doc);
+          if (!response.ok) {
+            throw new Error(`JWKS request failed (${uri}): HTTP ${response.status}`);
+          }
+          let doc;
+          try {
+            doc = await response.json();
+          } catch {
+            throw new Error(`JWKS response is not JSON (${uri})`);
+          }
+          try {
+            return createLocalJWKSet(doc);
+          } catch (err) {
+            throw new Error(
+              `JWKS is invalid (${uri}): ${err instanceof Error ? err.message : err}`,
+            );
+          }
         }
-        return createRemoteJWKSet(new URL(uri));
+        let jwksUrl;
+        try {
+          jwksUrl = new URL(uri);
+        } catch (err) {
+          throw new Error(
+            `JWKS URI is not a valid URL (${uri}): ${err instanceof Error ? err.message : err}`,
+          );
+        }
+        return createRemoteJWKSet(jwksUrl);
       })();
-      remote = await resolving;
+      try {
+        remote = await resolving;
+      } catch (err) {
+        // Clear so a later verify can retry after transient discovery/JWKS failures.
+        resolving = undefined;
+        throw err;
+      }
     }
     return remote(protectedHeader, token);
   };
@@ -256,8 +317,8 @@ function mapVerifiedPayloadToIdentity({
     usage_subject: String(usageSubject),
     usage_subject_type: subjectTypeValue,
   };
-  const expiry = typeof payload.exp === "number" ? payload.exp : nowSeconds() + 60;
-  return { identity, expiry, raw: payload };
+  // `exp` is required by jwtVerify(requiredClaims); no forever-valid fallback.
+  return { identity, expiry: payload.exp, raw: payload };
 }
 
 async function verifyJwtBearer({
@@ -273,10 +334,14 @@ async function verifyJwtBearer({
 }) {
   let payload;
   try {
+    // Accept iss with or without a trailing slash (OIDC issuers vary); jwtIssuer is
+    // already normalized (no trailing slash) for discovery/caching.
     ({ payload } = await jwtVerify(token, keyset, {
-      issuer: jwtIssuer,
+      issuer: [jwtIssuer, `${jwtIssuer}/`],
       audience: jwtAudience,
       algorithms: ALLOWED_JWT_ALGS,
+      requiredClaims: ["exp", subjectClaim],
+      clockTolerance: JWT_CLOCK_TOLERANCE_SECONDS,
     }));
   } catch (err) {
     console.warn(`oidc verification failed: ${err.message}`);
@@ -297,7 +362,8 @@ async function verifyJwtBearer({
   });
 }
 
-function createCompositeExchangeCache() {
+/** @internal Exported for unit tests. */
+export function createCompositeExchangeCache() {
   /** @type {Map<string, { expiresAt: number, result?: any, inflight?: Promise<any> }>} */
   const cache = new Map();
 
@@ -307,7 +373,11 @@ function createCompositeExchangeCache() {
       if (!entry) {
         return null;
       }
-      if (entry.result !== undefined && entry.expiresAt > nowSeconds()) {
+      if (entry.expiresAt <= nowSeconds()) {
+        cache.delete(key);
+        return null;
+      }
+      if (entry.result !== undefined) {
         return entry.result;
       }
       if (entry.inflight !== undefined) {
@@ -323,6 +393,22 @@ function createCompositeExchangeCache() {
       });
     },
     setResult(key, result, ttlSeconds) {
+      const ttl = Math.max(1, Math.min(ttlSeconds, COMPOSITE_CACHE_MAX_TTL_SECONDS));
+      cache.set(key, { expiresAt: nowSeconds() + ttl, result });
+    },
+    /** Only clear when this promise is still the cached inflight (avoid clobbering a newer entry). */
+    clearInflight(key, promise) {
+      const entry = cache.get(key);
+      if (entry?.inflight === promise) {
+        cache.delete(key);
+      }
+    },
+    /** Only store a result when this promise is still the cached inflight. */
+    setResultForInflight(key, promise, result, ttlSeconds) {
+      const entry = cache.get(key);
+      if (entry?.inflight !== promise) {
+        return;
+      }
       const ttl = Math.max(1, Math.min(ttlSeconds, COMPOSITE_CACHE_MAX_TTL_SECONDS));
       cache.set(key, { expiresAt: nowSeconds() + ttl, result });
     },
@@ -409,10 +495,11 @@ async function exchangeCompositeApiKey({
 
 /**
  * OIDC/JWT verifier (bring-your-own OAuth). Validates a `Bearer <jwt>` against
- * `jwtIssuer`/`jwtAudience` using the issuer's JWKS (auto-cached & refreshed by
- * jose's createRemoteJWKSet).
+ * `jwtIssuer`/`jwtAudience` using the issuer's JWKS. By default jose's
+ * `createRemoteJWKSet` fetches, caches, and refreshes keys. When `fetchImpl` is
+ * provided (tests / custom HTTP), JWKS is fetched once into a local keyset.
  *
- * Also accepts composite `Bearer app_<clientId>.pmth_<key>` when
+ * Also accepts composite `Bearer app_<24hex>_<secret>` when
  * `tokenExchangeBaseUrl` is configured: RFC 8693 exchange at
  * `/api/v1/apps/{clientId}/oidc/token`, then the same JWT verification path.
  *
@@ -436,7 +523,8 @@ export function createOidcVerifier({
   exchangeM2mClientId,
   exchangeM2mClientSecret,
 }) {
-  if (!jwtIssuer) {
+  const normalizedJwtIssuer = normalizeIssuer(jwtIssuer);
+  if (!normalizedJwtIssuer) {
     throw new Error("createOidcVerifier: jwtIssuer is required");
   }
   if (!jwtAudience) {
@@ -445,10 +533,10 @@ export function createOidcVerifier({
   const keyset = createOidcKeyResolver({
     jwks,
     jwksUri,
-    jwtIssuer,
+    jwtIssuer: normalizedJwtIssuer,
     fetchImpl,
   });
-  const identityIssuer = issuer ?? jwtIssuer;
+  const identityIssuer = issuer ?? normalizedJwtIssuer;
   const http = fetchImpl ?? fetch;
   const exchangeOrigin = tokenExchangeBaseUrl
     ? normalizeTokenExchangeBaseUrl(tokenExchangeBaseUrl)
@@ -466,7 +554,7 @@ export function createOidcVerifier({
     return verifyJwtBearer({
       token,
       keyset,
-      jwtIssuer,
+      jwtIssuer: normalizedJwtIssuer,
       jwtAudience,
       identityIssuer,
       clientClaim,
@@ -490,7 +578,8 @@ export function createOidcVerifier({
       return cached;
     }
 
-    const inflight = (async () => {
+    let inflight;
+    inflight = (async () => {
       const accessToken = await exchangeCompositeApiKey({
         exchangeBaseUrl: exchangeOrigin,
         publicClientId: parts.publicClientId,
@@ -509,10 +598,10 @@ export function createOidcVerifier({
         });
       }
       const ttl = Math.max(1, verified.expiry - nowSeconds());
-      exchangeCache.setResult(cacheKey, verified, ttl);
+      exchangeCache.setResultForInflight(cacheKey, inflight, verified, ttl);
       return verified;
     })().catch((err) => {
-      exchangeCache.clear(cacheKey);
+      exchangeCache.clearInflight(cacheKey, inflight);
       throw err;
     });
 

@@ -173,10 +173,27 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
     assert.equal(body.identity.usage_subject_type, "external_user_id");
   });
 
-  it("authorizes a composite app_*.pmth_* via mocked exchange", async () => {
-    const { token, jwks } = await setupPymthouseJwt();
+  it("authorizes a composite app_*_* via mocked exchange", async () => {
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const jwk = await exportJWK(publicKey);
+    jwk.kid = "pymthouse-test";
+    jwk.alg = "RS256";
+    jwk.use = "sig";
+    const jwks = createLocalJWKSet({ keys: [jwk] });
+    const clientId = "app_abc123abc123abc123abcdef";
+    const token = await new SignJWT({
+      client_id: clientId,
+      external_user_id: "user-456",
+      scope: "sign:job",
+    })
+      .setProtectedHeader({ alg: "RS256", kid: "pymthouse-test" })
+      .setIssuer(ISSUER)
+      .setAudience(defaultSignerWebhookJwtAudience(ISSUER))
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+
     const { createOidcVerifier } = await import("./verifiers.mjs");
-    const clientId = "app_abc123";
     const fetchImpl = async (input) => {
       const url = String(input);
       assert.ok(url.includes(`/api/v1/apps/${clientId}/oidc/token`));
@@ -205,7 +222,9 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        headers: { Authorization: [`Bearer ${clientId}.pmth_deadbeef`] },
+        headers: {
+          Authorization: [`Bearer ${clientId}_pmth_deadbeef`],
+        },
       }),
     });
 
@@ -213,6 +232,6 @@ describe("pymthouse embedded flow (handleAuthorize + legacy config)", () => {
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.status, 200);
-    assert.equal(body.auth_id, "app_abc123:user-456");
+    assert.equal(body.auth_id, `${clientId}:user-456`);
   });
 });
